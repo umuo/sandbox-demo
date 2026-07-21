@@ -191,9 +191,14 @@ final class WindowsNative {
         public int bInheritHandle;
     }
 
-    static class SIZE_TByReference extends ByReference {
+    /**
+     * JNA instantiates {@link ByReference} parameters reflectively while preparing a native call.
+     * Both the class and its no-argument constructor therefore have to be public, even though the
+     * type is only used by this package.
+     */
+    public static class SIZE_TByReference extends ByReference {
 
-        SIZE_TByReference() {
+        public SIZE_TByReference() {
             super(Native.POINTER_SIZE);
         }
 

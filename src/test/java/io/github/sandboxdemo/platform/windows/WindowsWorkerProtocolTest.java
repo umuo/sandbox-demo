@@ -2,9 +2,12 @@ package io.github.sandboxdemo.platform.windows;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.github.sandboxdemo.api.NetworkPolicy;
 import io.github.sandboxdemo.api.ReadPolicy;
+import io.github.sandboxdemo.api.SandboxException;
 import io.github.sandboxdemo.api.SandboxPolicy;
 import io.github.sandboxdemo.api.SandboxResult;
 import io.github.sandboxdemo.core.PathPolicyValidator;
@@ -74,5 +77,18 @@ class WindowsWorkerProtocolTest {
         } finally {
             PathPolicyValidator.cleanup(policy);
         }
+    }
+
+    @Test
+    void requestReadFailurePreservesTheOperatingSystemCause() throws Exception {
+        Path directoryInsteadOfRequest = Files.createDirectory(root.resolve("request.bin"));
+
+        SandboxException error =
+                assertThrows(
+                        SandboxException.class,
+                        () -> WindowsWorkerProtocol.readRequest(directoryInsteadOfRequest));
+
+        assertTrue(error.getMessage().startsWith("failed to read Windows worker request ("));
+        assertTrue(error.getCause() instanceof java.io.IOException);
     }
 }

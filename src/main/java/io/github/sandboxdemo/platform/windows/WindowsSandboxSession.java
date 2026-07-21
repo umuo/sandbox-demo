@@ -59,10 +59,13 @@ final class WindowsSandboxSession implements AutoCloseable {
         return resultFile;
     }
 
-    void sealRequest(String sandboxUserSid) throws SandboxException, InterruptedException {
-        runIcacls(
-                List.of(requestFile.toString(), "/deny", "*" + sandboxUserSid + ":(W,D)", "/Q"),
-                "seal Windows worker request");
+    void sealRequest(String sandboxUserSid) throws SandboxException {
+        // Do not use icacls `(W)` here. FILE_GENERIC_WRITE also contains READ_CONTROL and
+        // SYNCHRONIZE; denying the generic mask can prevent the worker from reading its request.
+        // The native ACL helper denies only the concrete mutation rights and leaves read access
+        // intact. The host-owned handle below additionally prevents write/delete sharing while
+        // the worker is alive.
+        WindowsAclManager.denyFileWrites(requestFile, sandboxUserSid);
         sealedRequestHandle =
                 Kernel32.INSTANCE.CreateFileW(
                         new WString(requestFile.toString()),

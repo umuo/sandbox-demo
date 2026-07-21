@@ -116,7 +116,13 @@ final class WindowsWorkerProtocol {
         } catch (EOFException e) {
             throw new SandboxException("truncated Windows worker request", e);
         } catch (IOException | IllegalArgumentException e) {
-            throw new SandboxException("failed to read Windows worker request", e);
+            throw new SandboxException(
+                    "failed to read Windows worker request ("
+                            + e.getClass().getSimpleName()
+                            + ": "
+                            + safeMessage(e)
+                            + ")",
+                    e);
         }
     }
 
@@ -269,6 +275,14 @@ final class WindowsWorkerProtocol {
             throw new EOFException("expected " + length + " bytes but received " + bytes.length);
         }
         return bytes;
+    }
+
+    private static String safeMessage(Throwable error) {
+        String message = error.getMessage();
+        if (message == null || message.isBlank()) {
+            return "no error message";
+        }
+        return message.length() <= 1000 ? message : message.substring(0, 1000);
     }
 
     record WorkerRequest(

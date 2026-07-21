@@ -128,6 +128,22 @@ final class WindowsAclManager {
         update(path, sid, rights, DENY_ACCESS, OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE);
     }
 
+    /**
+     * Makes one existing file read-only to {@code sid} without denying the access-control and
+     * synchronization bits that Windows also needs when opening the file for reading.
+     */
+    static void denyFileWrites(Path path, String sid) throws SandboxException {
+        update(path, sid, DENY_WRITE, DENY_ACCESS, 0);
+    }
+
+    static int readExecuteMaskForTest() {
+        return READ_EXECUTE;
+    }
+
+    static int denyWriteMaskForTest() {
+        return DENY_WRITE;
+    }
+
     private void rollback(List<AclMutation> mutations) {
         List<AclMutation> reverse = new ArrayList<>(mutations);
         Collections.reverse(reverse);

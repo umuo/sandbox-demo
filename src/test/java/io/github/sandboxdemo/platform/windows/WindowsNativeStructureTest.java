@@ -4,6 +4,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.sun.jna.Native;
+import com.sun.jna.NativeMappedConverter;
+import java.lang.reflect.Modifier;
 import org.junit.jupiter.api.Test;
 
 class WindowsNativeStructureTest {
@@ -22,5 +24,26 @@ class WindowsNativeStructureTest {
         assertTrue(
                 WindowsCapabilitySid.random()
                         .matches("S-1-5-21-(?:[1-9][0-9]{0,9}-){3}[1-9][0-9]{0,9}"));
+    }
+
+    @Test
+    void sizeReferenceCanBeConstructedReflectivelyByJna() throws Exception {
+        var type = WindowsNative.SIZE_TByReference.class;
+        var constructor = type.getConstructor();
+
+        assertTrue(Modifier.isPublic(type.getModifiers()));
+        assertTrue(Modifier.isPublic(constructor.getModifiers()));
+        assertTrue(constructor.newInstance().getValue().longValue() >= 0);
+        assertTrue(
+                NativeMappedConverter.getInstance(type).defaultValue()
+                        instanceof WindowsNative.SIZE_TByReference);
+    }
+
+    @Test
+    void writeDenyMaskDoesNotOverlapReadExecuteRights() {
+        assertEquals(
+                0,
+                WindowsAclManager.readExecuteMaskForTest()
+                        & WindowsAclManager.denyWriteMaskForTest());
     }
 }

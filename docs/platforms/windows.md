@@ -254,6 +254,8 @@ ALLOW 的含义是“SDK 不阻断”，不是绕过宿主 Firewall、代理、�
 
 每次运行使用受保护 session 目录和有界二进制请求/结果文件。协议包含 magic、版本和长度上限，避免 worker 把任意文件当作可信请求反序列化。
 
+主进程写完请求后，会为 sandbox 用户添加一条仅覆盖实际变更位的拒写 ACE，并以不共享写入/删除的只读句柄保持该请求文件。这里不能使用 `icacls /deny (W)`：Windows 的 `FILE_GENERIC_WRITE` 同时包含 `READ_CONTROL` 与 `SYNCHRONIZE`，直接拒绝整个通用写掩码可能让 worker 连请求也无法读取。当前实现只拒绝写数据、追加、属性变更、删除和 ACL/owner 变更，保留读取所需权限。
+
 内部协议不是 SDK 公共 API；升级 SDK 后必须重新执行 setup，使 worker runtime 与主 SDK 版本一致。
 
 ## Windows 读取限制
