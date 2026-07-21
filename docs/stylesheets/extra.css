@@ -1,0 +1,17 @@
+:root {
+  --md-primary-fg-color: #3949ab;
+  --md-accent-fg-color: #ef6c00;
+}
+
+.md-typeset table:not([class]) th {
+  white-space: nowrap;
+}
+
+.md-typeset .security-boundary {
+  border-left: 0.25rem solid var(--md-accent-fg-color);
+  padding-left: 1rem;
+}
+
+.md-typeset code {
+  overflow-wrap: anywhere;
+}

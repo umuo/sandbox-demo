@@ -33,6 +33,24 @@ Windows 的 restricted-token 模型无法在保持通用 Win32 工具兼容性�
 
 详细保证和限制见 [docs/SECURITY.md](docs/SECURITY.md)。
 
+## 架构文档站点
+
+`docs/` 提供 Windows、Linux/WSL2、macOS 的完整实现说明、策略模型、安全边界和术语表，使用 MkDocs Material 构建：
+
+```bash
+python3 -m venv .venv-docs
+.venv-docs/bin/python -m pip install -r requirements-docs.txt
+.venv-docs/bin/python -m mkdocs serve
+```
+
+严格构建：
+
+```bash
+.venv-docs/bin/python -m mkdocs build --strict
+```
+
+入口见 [docs/index.md](docs/index.md)，站点开发说明见 [docs/site-development.md](docs/site-development.md)。
+
 ## 构建
 
 ```bash
