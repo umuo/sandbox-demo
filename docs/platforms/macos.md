@@ -9,9 +9,10 @@ flowchart TD
     A["MacOsSeatbeltSandboxRunner"] --> B["PathPolicyValidator"]
     B --> C["MacOsSeatbeltProfile.generate"]
     C --> D["SBPL profile + -D path parameters"]
-    D --> E["/usr/bin/sandbox-exec -p profile"]
-    E --> F["目标 executable + argv"]
-    F --> G["全部后代继承 Seatbelt"]
+    D --> E["同 profile 运行可信读写探针"]
+    E --> F["/usr/bin/sandbox-exec -p profile"]
+    F --> G["目标 executable + argv"]
+    G --> H["全部后代继承 Seatbelt"]
 ```
 
 ## Seatbelt
@@ -34,6 +35,19 @@ Seatbelt 是 macOS 的内核沙箱机制。它根据进程携带的 profile 判�
 Apple 已将该接口标记为 deprecated，意味着未来兼容性需要持续验证；deprecated 不代表当前所有系统立即不可用。
 
 如果宿主 Java 进程本身位于不允许嵌套的 App Sandbox 中，`sandbox_apply: Operation not permitted` 会被转换成 `SandboxBackendUnavailableException`，不会无沙箱运行。
+
+### 生成策略探针
+
+仅检查 `/usr/bin/sandbox-exec` 是否存在不足以证明 Seatbelt 可用。每次执行用户程序前，SDK 会用**本次生成的同一 profile 和路径参数**运行固定的 `/bin/sh` 探针，在私有 temp 中创建并删除一个 marker：
+
+```text
+sandbox-exec + generated profile
+  -> /bin/sh
+  -> private-temp/seatbelt-probe
+  -> delete marker
+```
+
+这能区分两种相同的退出码：用户程序自己返回 134，与宿主在应用 profile 时 abort。旧系统常以 71 报告 `sandbox_apply`，部分托管 macOS runner 会以 134 中止；探针中的这两种结果均视为 backend unavailable。其他 probe 错误仍作为实现/策略错误失败，不会被测试静默吞掉。
 
 ## SBPL
 
@@ -193,6 +207,7 @@ Seatbelt policy 由 fork/exec 后代继承，因此子进程不能通过简单�
 
 - `sandbox-exec` 已 deprecated；每个目标 macOS 版本都必须实测；
 - App Sandbox 宿主可能禁止嵌套 Seatbelt；
+- 部分 GitHub 托管 macOS runner 会拒绝或 abort Seatbelt profile；集成测试会显示为 skipped，发布门禁仍应包含一台确认支持 Seatbelt 的自托管 runner；
 - 与宿主共享内核，不能防御 kernel exploit；
 - 没有内建 CPU/内存/disk quota；
 - 最小 Mach/sysctl/IOKit allowlist 可能随工具链改变；

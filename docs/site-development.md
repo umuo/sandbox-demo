@@ -92,3 +92,11 @@ docs/
 ```
 
 严格构建会把断链、未识别链接和导航遗漏转化为发布前可见问题。
+
+平台集成测试还要区分“代码错误”和“CI 宿主根本不提供该内核能力”：
+
+- Linux 只有 bubblewrap 存在且 user/mount/PID namespace 能实际创建时才执行 enforcement 断言；bootstrap 被 AppArmor/容器策略拒绝时抛 `SandboxBackendUnavailableException`；
+- macOS 会先运行生成 profile 探针，托管 runner 以 71/134 拒绝 Seatbelt 时测试跳过；
+- Windows production test 必须先执行 elevated setup，并测试 native ACL、专用账户、Firewall 和 Job Object 的完整链路。
+
+跳过不是发布环境验证。生产发布应另设自托管三平台 runner，并把“本平台 enforcement 测试实际执行、未跳过”作为制品晋级条件。

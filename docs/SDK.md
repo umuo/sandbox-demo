@@ -86,7 +86,7 @@ public final class AgentSandboxService {
 }
 ```
 
-`status()` 是无副作用的部署健康检查：验证 launcher/Windows 安装元数据，但不会执行不可信探测命令。内核策略、容器环境或 macOS 嵌套 Seatbelt 仍可能在真正执行时拒绝请求，因此调用方也必须处理 `SandboxBackendUnavailableException`。
+`status()` 是不修改持久配置的部署健康检查，也不会执行不可信命令。Windows 验证安装元数据、账户和 Firewall；Linux 实际运行一次可信 bubblewrap namespace 探针；macOS 实际运行一次可信 Seatbelt 探针。因此它能在启动阶段发现“文件存在但内核/AppArmor/外层 sandbox 拒绝使用”的环境。实际请求还会验证其动态路径/profile，调用方仍必须处理 `SandboxBackendUnavailableException`。
 
 不要把模型生成的整条字符串直接当作 executable。Agent 的 Shell Adapter 应明确构造 argv：
 

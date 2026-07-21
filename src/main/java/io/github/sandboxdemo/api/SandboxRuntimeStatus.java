@@ -2,7 +2,7 @@ package io.github.sandboxdemo.api;
 
 import java.util.Objects;
 
-/** Side-effect-free runtime readiness result suitable for Agent health checks. */
+/** Non-persistent runtime readiness result suitable for Agent health checks. */
 public record SandboxRuntimeStatus(
         SandboxCapabilities capabilities, boolean ready, String diagnostic) {
 

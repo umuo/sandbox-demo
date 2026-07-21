@@ -13,7 +13,7 @@
 | 平台 | 文件系统边界 | 网络边界 | 进程树边界 | 严格读取白名单 |
 |---|---|---|---|---|
 | Windows | 专用低权限账户、NTFS ACL、Capability SID、`WRITE_RESTRICTED` Token | online/offline 账户与 Windows Firewall | 双层 Job Object | 否；当前实现只支持 `ReadPolicy.HOST` |
-| Linux / WSL2 | bubblewrap mount namespace、只读/可写 bind mount | network namespace 与 seccomp | PID namespace、bubblewrap PID 1、`--die-with-parent` | 是 |
+| Linux / WSL2 | bubblewrap mount namespace、只读/可写 bind mount | seccomp socket policy | PID namespace、bubblewrap PID 1、`--die-with-parent` | 是 |
 | macOS | Seatbelt / SBPL deny-default profile | Seatbelt network rules | Seatbelt 继承、Java 监督与超时回收 | 是 |
 
 !!! warning "同一个策略，不等于同一种内核机制"

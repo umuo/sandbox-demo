@@ -1,6 +1,5 @@
 package io.github.sandboxdemo.platform.linux;
 
-import io.github.sandboxdemo.api.NetworkPolicy;
 import io.github.sandboxdemo.api.ReadPolicy;
 import io.github.sandboxdemo.api.SandboxBackendUnavailableException;
 import io.github.sandboxdemo.api.SandboxException;
@@ -12,13 +11,16 @@ import io.github.sandboxdemo.core.ExecutableResolver;
 import io.github.sandboxdemo.core.PathPolicyValidator;
 import io.github.sandboxdemo.core.ProcessExecutor;
 import io.github.sandboxdemo.core.ValidatedPolicy;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
-/** Linux strategy backed by bubblewrap mount/user/PID/network namespaces. */
+/** Linux strategy backed by bubblewrap namespaces plus a seccomp network policy. */
 public final class LinuxBubblewrapSandboxRunner implements SandboxRunner {
 
     private static final List<Path> RUNTIME_ROOTS =
@@ -46,6 +48,59 @@ public final class LinuxBubblewrapSandboxRunner implements SandboxRunner {
         return "linux-bubblewrap";
     }
 
+    /** Executes a benign namespace probe without running caller-controlled code. */
+    public static String probeBackend() throws SandboxException, InterruptedException {
+        Path bwrap = findBubblewrap();
+        List<String> command =
+                List.of(
+                        bwrap.toString(),
+                        "--cap-drop",
+                        "ALL",
+                        "--die-with-parent",
+                        "--new-session",
+                        "--unshare-user",
+                        "--unshare-pid",
+                        "--unshare-ipc",
+                        "--unshare-uts",
+                        "--ro-bind",
+                        "/",
+                        "/",
+                        "--dev",
+                        "/dev",
+                        "--proc",
+                        "/proc",
+                        "--",
+                        "/bin/true");
+        Process process;
+        try {
+            process = new ProcessBuilder(command).redirectErrorStream(true).start();
+        } catch (IOException e) {
+            throw new SandboxBackendUnavailableException(
+                    "failed to start bubblewrap readiness probe: " + e.getMessage());
+        }
+        boolean completed = process.waitFor(5, TimeUnit.SECONDS);
+        if (!completed) {
+            process.destroyForcibly();
+            process.waitFor(1, TimeUnit.SECONDS);
+            throw new SandboxBackendUnavailableException(
+                    "bubblewrap namespace readiness probe did not complete");
+        }
+        String output;
+        try {
+            output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            throw new SandboxException("failed to read bubblewrap readiness output", e);
+        }
+        if (process.exitValue() != 0) {
+            throw new SandboxBackendUnavailableException(
+                    "bubblewrap namespace readiness probe failed (exit="
+                            + process.exitValue()
+                            + "): "
+                            + output.trim());
+        }
+        return "bubblewrap namespace probe passed: " + bwrap;
+    }
+
     @Override
     public SandboxResult execute(SandboxRequest request)
             throws SandboxException, InterruptedException {
@@ -60,7 +115,8 @@ public final class LinuxBubblewrapSandboxRunner implements SandboxRunner {
                             policy.workingDirectory(),
                             environment,
                             policy.allowPathSearch());
-            Path seccompFilter = LinuxSeccompFilter.write(policy.privateTempDirectory());
+            Path seccompFilter =
+                    LinuxSeccompFilter.write(policy.privateTempDirectory(), policy.networkPolicy());
 
             List<String> sandboxCommand = new ArrayList<>();
             sandboxCommand.add(bwrap.toString());
@@ -74,9 +130,9 @@ public final class LinuxBubblewrapSandboxRunner implements SandboxRunner {
             sandboxCommand.add("--unshare-pid");
             sandboxCommand.add("--unshare-ipc");
             sandboxCommand.add("--unshare-uts");
-            if (policy.networkPolicy() == NetworkPolicy.DENY) {
-                sandboxCommand.add("--unshare-net");
-            }
+            // Network denial is enforced by the seccomp program, which rejects socket,
+            // socketpair, and io_uring setup. Avoiding --unshare-net also avoids a known
+            // host-kernel/AppArmor failure while bubblewrap configures the new loopback device.
 
             if (policy.readPolicy() == ReadPolicy.HOST) {
                 addPathPair(sandboxCommand, "--ro-bind", Path.of("/"));
@@ -126,10 +182,29 @@ public final class LinuxBubblewrapSandboxRunner implements SandboxRunner {
             command.add("sandbox-seccomp-loader");
             command.add(seccompFilter.toString());
             command.addAll(sandboxCommand);
-            return ProcessExecutor.execute(command, policy, environment, request.standardInput());
+            SandboxResult result =
+                    ProcessExecutor.execute(command, policy, environment, request.standardInput());
+            if (isBubblewrapBootstrapFailure(result)) {
+                throw new SandboxBackendUnavailableException(
+                        "bubblewrap is installed but the host refused its namespace setup: "
+                                + result.stderrUtf8().trim());
+            }
+            return result;
         } finally {
             PathPolicyValidator.cleanup(policy);
         }
+    }
+
+    private static boolean isBubblewrapBootstrapFailure(SandboxResult result) {
+        if (result.successful()) {
+            return false;
+        }
+        String stderr = result.stderrUtf8();
+        return stderr.contains("bwrap: No permissions to create a new namespace")
+                || stderr.contains("bwrap: Creating new namespace failed")
+                || stderr.contains("bwrap: Failed to make / slave")
+                || stderr.contains("bwrap: loopback: Failed RTM_NEWADDR")
+                || stderr.contains("bwrap: setting up uid map");
     }
 
     private static void addPathPair(List<String> command, String option, Path path) {

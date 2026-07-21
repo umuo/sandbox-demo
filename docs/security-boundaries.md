@@ -73,7 +73,7 @@ stdin、stdout、stderr 和内部协议都有大小上限，防止简单内存�
 |---|---|---|---|
 | workspace 外禁止写 | 强 | 强 | 强 |
 | declared-only 读取 | 不支持 | mount namespace | Seatbelt |
-| 网络 deny | SID Firewall | network namespace + seccomp | Seatbelt |
+| 网络 deny | SID Firewall | seccomp socket deny | Seatbelt |
 | 后代继承文件策略 | Token/ACL | namespace | Seatbelt |
 | 强制回收进程树 | Job Object | PID namespace | 较弱，Java 监督 |
 | 资源数量限制 | 进程数、Job 内存 | 未内建 cgroup | 未内建 |

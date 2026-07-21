@@ -76,7 +76,7 @@ public final class SandboxClient {
         return capabilities;
     }
 
-    /** Performs a side-effect-free readiness check of the configured platform runtime. */
+    /** Performs a non-persistent readiness probe of the configured platform runtime. */
     public SandboxRuntimeStatus status() {
         return statusSupplier.get();
     }

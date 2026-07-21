@@ -6,16 +6,14 @@ import io.github.sandboxdemo.api.SandboxCapabilities;
 import io.github.sandboxdemo.api.SandboxException;
 import io.github.sandboxdemo.api.SandboxPlatform;
 import io.github.sandboxdemo.api.SandboxRuntimeStatus;
+import io.github.sandboxdemo.platform.linux.LinuxBubblewrapSandboxRunner;
+import io.github.sandboxdemo.platform.macos.MacOsSeatbeltSandboxRunner;
 import io.github.sandboxdemo.platform.windows.WindowsSandboxSetup;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.List;
 import java.util.Set;
 
 /** SDK lifecycle and readiness facade. Setup operations never run implicitly during execution. */
 public final class SandboxRuntime {
-
-    private static final Path MACOS_LAUNCHER = Path.of("/usr/bin/sandbox-exec");
 
     private SandboxRuntime() {}
 
@@ -45,7 +43,7 @@ public final class SandboxRuntime {
         return capabilities(platform, defaultBackendName(platform));
     }
 
-    /** Performs a side-effect-free readiness check for the current platform. */
+    /** Performs a non-persistent readiness probe for the current platform. */
     public static SandboxRuntimeStatus status() {
         SandboxPlatform platform = SandboxPlatform.current();
         return status(platform, defaultWindowsHome(), defaultBackendName(platform));
@@ -74,17 +72,12 @@ public final class SandboxRuntime {
                     yield new SandboxRuntimeStatus(capabilities, true, "Windows runtime verified");
                 }
                 case LINUX -> {
-                    Path bwrap = findBubblewrap();
                     yield new SandboxRuntimeStatus(
-                            capabilities, true, "bubblewrap launcher: " + bwrap);
+                            capabilities, true, LinuxBubblewrapSandboxRunner.probeBackend());
                 }
                 case MACOS ->
                         new SandboxRuntimeStatus(
-                                capabilities,
-                                Files.isExecutable(MACOS_LAUNCHER),
-                                Files.isExecutable(MACOS_LAUNCHER)
-                                        ? "Seatbelt launcher: " + MACOS_LAUNCHER
-                                        : "Seatbelt launcher is unavailable: " + MACOS_LAUNCHER);
+                                capabilities, true, MacOsSeatbeltSandboxRunner.probeBackend());
             };
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
@@ -98,23 +91,6 @@ public final class SandboxRuntime {
                             ? error.getClass().getSimpleName()
                             : message);
         }
-    }
-
-    private static Path findBubblewrap() {
-        String override = System.getenv("SANDBOX_BWRAP");
-        List<Path> candidates =
-                override == null || override.isBlank()
-                        ? List.of(Path.of("/usr/bin/bwrap"), Path.of("/bin/bwrap"))
-                        : List.of(Path.of(override));
-        return candidates.stream()
-                .filter(Path::isAbsolute)
-                .filter(Files::isExecutable)
-                .findFirst()
-                .map(path -> path.toAbsolutePath().normalize())
-                .orElseThrow(
-                        () ->
-                                new IllegalStateException(
-                                        "bubblewrap is unavailable; install it or set SANDBOX_BWRAP"));
     }
 
     private static String defaultBackendName(SandboxPlatform platform) {

@@ -216,7 +216,11 @@ Windows New Technology File System。当前后端要求策略路径位于 NTFS�
 
 ### `icacls.exe`
 
-Windows 系统 ACL 管理命令。项目用独立 argv 调用它配置 SID ACE，不让模型命令参与。
+Windows 系统 ACL 管理命令。本项目只在 setup/session 等真实账户 SID 场景用独立 argv 调用它。随机 synthetic SID 的短期 ACE 改用 Win32 ACL API，因为某些 Windows 版本会让 `icacls` 对未映射 SID 返回 1332。
+
+### `GetNamedSecurityInfoW` / `SetEntriesInAclW` / `SetNamedSecurityInfoW`
+
+读取对象安全描述符、把一条显式授权合并进现有 ACL、再写回 DACL 的 Win32 API 组合。它直接接收 binary SID，不要求 SID 能解析为账户名。
 
 ### OI / CI / RX / M
 

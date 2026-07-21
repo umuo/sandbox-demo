@@ -21,8 +21,8 @@ Command parsing is not a security boundary. Every child is launched under an OS-
 
 - bubblewrap starts with an empty tmpfs root for `DECLARED_ONLY`, then read-only binds runtime/readable roots, writable binds writable roots and finally read-only binds protected paths.
 - `HOST` uses a read-only bind of `/` before writable overlays.
-- User, PID, IPC and UTS namespaces are unshared; denied networking also unshares the network namespace.
-- All Linux capabilities are dropped. A seccomp classic-BPF filter validates the audit architecture and rejects AF_UNIX `socket`/`socketpair`, preventing access to mounted Docker, D-Bus or SSH-agent sockets even when host reads are enabled.
+- User, PID, IPC and UTS namespaces are unshared. Network enforcement does not depend on creating a network namespace.
+- All Linux capabilities are dropped. A seccomp classic-BPF filter validates the audit architecture. DENY rejects `socket`, `socketpair`, and `io_uring_setup`; ALLOW still rejects AF_UNIX sockets and `io_uring_setup`, preventing access to mounted Docker, D-Bus, or SSH-agent sockets even when host reads are enabled.
 - bubblewrap supplies PID 1/reaping and `--die-with-parent` behavior.
 
 ### macOS
@@ -69,7 +69,7 @@ Windows Job Objects and Linux PID namespaces are the primary strong tree boundar
 
 ### Network details
 
-- Linux DENY isolates external interfaces but retains the namespace-local loopback device.
+- Linux DENY blocks creation of socket endpoints with seccomp, including loopback and Unix-domain sockets. It relies on the trusted Java launcher not leaking pre-opened network descriptors.
 - macOS DENY is a Seatbelt network policy.
 - Windows DENY depends on the Windows Defender Firewall service and policy not being disabled or superseded after verification. Enterprise Group Policy must preserve the SID-scoped block rules.
 - Network ALLOW never grants access to secrets that are not otherwise reachable, but SSRF and access to local TCP services remain application risks.

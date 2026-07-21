@@ -124,7 +124,9 @@ flowchart TD
 - DACL：Discretionary ACL，决定谁被允许或拒绝哪些访问；
 - ACE：Access Control Entry，DACL 中的一条 Allow/Deny 记录。
 
-本项目通过 `icacls.exe` 配置典型规则：
+短期 capability ACE 通过 `GetNamedSecurityInfoW`、`SetEntriesInAclW` 和 `SetNamedSecurityInfoW` 直接修改 DACL。这样随机 synthetic SID 不需要映射成 LSA 账户；`icacls.exe` 在部分 Windows/CI 主机上会对这种 SID 返回 `ERROR_NONE_MAPPED (1332)`。setup 阶段针对真实账户 SID 的固定 ACL 仍可使用 `icacls.exe`。
+
+典型规则：
 
 | 对象 | SID | ACE |
 |---|---|---|
@@ -141,7 +143,7 @@ flowchart TD
 - `M`：Modify，包含常规读写和删除；
 - `W,D`：写和删除相关权限。
 
-短期 capability ACE 在命令结束后撤销。专用用户的根 ACL 会记录到账本，在 uninstall 时清理。
+短期 capability ACE 在命令结束后撤销。DACL 的读取、合并、写回由跨进程 named mutex 串行化，避免并发执行相互覆盖 ACE。专用用户的根 ACL 会记录到账本，在 uninstall 时清理。
 
 ## 为什么项目根可以只读、子目录可写
 

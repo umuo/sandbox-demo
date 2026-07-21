@@ -107,7 +107,7 @@ Linux 用只读 bind mount 覆盖，macOS 发出 `deny file-write*`，Windows �
 ### `NetworkPolicy.DENY`
 
 - Windows：使用有入站/出站 SID-scoped block rules 的 offline account；
-- Linux：额外创建 network namespace，且 seccomp 始终阻止 AF_UNIX socket；
+- Linux：seccomp 拒绝 `socket`、`socketpair` 与 `io_uring_setup`；
 - macOS：不向 Seatbelt profile 添加 network allow rule。
 
 ### `NetworkPolicy.ALLOW`
@@ -152,7 +152,7 @@ stdout 和 stderr 各自的最大捕获大小，默认 4 MiB，API 上限 64 MiB
 | `HOST` | 支持 | 支持 | 支持 |
 | 多 writable roots | 支持 | 支持 | 支持 |
 | protected paths | 支持 | 支持 | 支持 |
-| network deny | Firewall | namespace + seccomp | Seatbelt |
+| network deny | Firewall | seccomp socket deny | Seatbelt |
 | network allow | online account | IP 网络；Unix socket 仍阻止 | Seatbelt allow |
 | 强进程树容器 | Job Object | PID namespace | 无等价 Job Object |
 

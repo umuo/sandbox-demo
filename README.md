@@ -6,7 +6,7 @@
 
 | 平台 | 文件系统 | 网络 | 进程树 |
 |---|---|---|---|
-| Linux | bubblewrap mount/user/PID namespace；默认只暴露运行时与声明路径 | network namespace；seccomp 禁止连接宿主 Unix socket | bubblewrap PID 1 + `--die-with-parent` |
+| Linux | bubblewrap mount/user/PID namespace；默认只暴露运行时与声明路径 | seccomp：DENY 拒绝网络 socket，ALLOW 仍拒绝宿主 Unix socket | bubblewrap PID 1 + `--die-with-parent` |
 | macOS | Seatbelt deny-default profile；默认只读声明路径 | Seatbelt network policy | 策略由后代继承，Java 监督与超时回收 |
 | Windows | 专用本地账户 + `WRITE_RESTRICTED` token + 随机 capability SID + NTFS ACL | offline 账户 + Windows Firewall | 双层 kill-on-close Job Object |
 
@@ -93,11 +93,11 @@ sudo apt-get install bubblewrap
 export SANDBOX_BWRAP=/opt/sandbox/bin/bwrap
 ```
 
-内核禁用 unprivileged user namespace 时后端会拒绝运行。生产镜像应固定 bubblewrap 版本并由包管理器或制品签名验证来源。
+内核禁用 unprivileged user namespace 时后端会拒绝运行。网络 DENY 不要求创建 network namespace，而是由 seccomp 拒绝 `socket`、`socketpair` 和 `io_uring_setup`，避免某些 Ubuntu/AppArmor 环境在配置隔离 loopback 时出现 `RTM_NEWADDR`。生产镜像应固定 bubblewrap 版本并由包管理器或制品签名验证来源。
 
 ## macOS
 
-使用系统 `/usr/bin/sandbox-exec` 和 Seatbelt。`sandbox-exec` 虽已 deprecated，但仍是当前可用的原生进程沙箱入口。若宿主应用本身禁止嵌套 Seatbelt，后端会返回 `SandboxBackendUnavailableException`。
+使用系统 `/usr/bin/sandbox-exec` 和 Seatbelt。`sandbox-exec` 虽已 deprecated，但仍是当前可用的原生进程沙箱入口。执行用户程序前会用同一 profile 在私有临时目录运行可信探针；若宿主禁止嵌套 Seatbelt，或托管 runner 以 71/134 拒绝 profile，后端会返回 `SandboxBackendUnavailableException`。
 
 真实集成测试需在非 App Sandbox 的原生 runner 上执行：
 

@@ -74,6 +74,11 @@ final class WindowsNative {
 
         Pointer CreateJobObjectW(Pointer jobAttributes, WString name);
 
+        Pointer CreateMutexW(
+                SECURITY_ATTRIBUTES mutexAttributes, boolean initialOwner, WString name);
+
+        boolean ReleaseMutex(Pointer mutex);
+
         boolean SetInformationJobObject(
                 Pointer job, int informationClass, Pointer information, int informationLength);
 
@@ -101,6 +106,31 @@ final class WindowsNative {
                 int stringSDRevision,
                 PointerByReference securityDescriptor,
                 IntByReference securityDescriptorSize);
+
+        int GetNamedSecurityInfoW(
+                WString objectName,
+                int objectType,
+                int securityInfo,
+                PointerByReference owner,
+                PointerByReference group,
+                PointerByReference dacl,
+                PointerByReference sacl,
+                PointerByReference securityDescriptor);
+
+        int SetNamedSecurityInfoW(
+                WString objectName,
+                int objectType,
+                int securityInfo,
+                Pointer owner,
+                Pointer group,
+                Pointer dacl,
+                Pointer sacl);
+
+        int SetEntriesInAclW(
+                int explicitEntryCount,
+                EXPLICIT_ACCESS explicitEntries,
+                Pointer oldAcl,
+                PointerByReference newAcl);
 
         boolean CreateRestrictedToken(
                 Pointer existingToken,
@@ -180,6 +210,29 @@ final class WindowsNative {
     public static class SID_AND_ATTRIBUTES extends Structure {
         public Pointer Sid;
         public int Attributes;
+    }
+
+    @Structure.FieldOrder({
+        "pMultipleTrustee",
+        "MultipleTrusteeOperation",
+        "TrusteeForm",
+        "TrusteeType",
+        "ptstrName"
+    })
+    public static class TRUSTEE extends Structure {
+        public Pointer pMultipleTrustee;
+        public int MultipleTrusteeOperation;
+        public int TrusteeForm;
+        public int TrusteeType;
+        public Pointer ptstrName;
+    }
+
+    @Structure.FieldOrder({"grfAccessPermissions", "grfAccessMode", "grfInheritance", "Trustee"})
+    public static class EXPLICIT_ACCESS extends Structure {
+        public int grfAccessPermissions;
+        public int grfAccessMode;
+        public int grfInheritance;
+        public TRUSTEE Trustee = new TRUSTEE();
     }
 
     @Structure.FieldOrder({

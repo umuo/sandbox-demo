@@ -12,8 +12,8 @@ flowchart TD
     D --> E["user / PID / IPC / UTS namespace"]
     E --> F["重新构造 mount namespace"]
     F --> G{"NetworkPolicy"}
-    G -->|DENY| H["unshare network namespace"]
-    G -->|ALLOW| I["保留 IP 网络"]
+    G -->|DENY| H["seccomp 拒绝全部 socket 创建"]
+    G -->|ALLOW| I["允许 IP socket；拒绝 AF_UNIX"]
     H --> J["目标 executable + argv"]
     I --> J
 ```
@@ -59,7 +59,7 @@ namespace 是 Linux 内核提供的资源视图隔离。它们彼此独立，不
 
 ### Network namespace
 
-提供独立网络设备、路由和 socket namespace。`NetworkPolicy.DENY` 时使用 `--unshare-net`，目标进程看不到宿主网络接口。
+提供独立网络设备、路由和 socket namespace。它是可选的网络隔离工具，但当前 SDK 不依赖 `--unshare-net`：Ubuntu/AppArmor 和部分托管 CI 会允许 user/mount namespace，却拒绝 bubblewrap 在新 network namespace 中配置 loopback，表现为 `Failed RTM_NEWADDR: Operation not permitted`。当前实现改在 seccomp syscall 边界阻止新 socket。
 
 ## 文件系统视图
 
@@ -127,7 +127,7 @@ Capability drop 不等于 seccomp，也不等于文件系统 namespace；三者�
 
 ## seccomp classic-BPF
 
-seccomp 让内核在系统调用入口执行 BPF 过滤器。当前过滤器不是完整 syscall allowlist；它专门阻止宿主 Unix-domain socket 访问。
+seccomp 让内核在系统调用入口执行 BPF 过滤器。当前过滤器不是完整 syscall allowlist；它负责网络 endpoint 创建控制。
 
 ### 为什么文件只读仍不够
 
@@ -135,20 +135,30 @@ Docker socket、D-Bus socket、SSH agent socket 是文件系统路径，但“�
 
 ### 当前规则
 
-过滤器：
+共同规则：
 
 1. 校验 seccomp audit architecture；
 2. architecture 不匹配时 kill process；
-3. 检查 `socket` 和 `socketpair` syscall；
-4. 第一个参数为 `AF_UNIX` 时返回 `EPERM`；
-5. 其他 syscall 放行。
+3. 拒绝 `io_uring_setup`，避免通过 io_uring network opcode 绕过对普通 socket syscall 的检查。
+
+`NetworkPolicy.DENY`：
+
+1. `socket` 返回 `EPERM`；
+2. `socketpair` 返回 `EPERM`；
+3. 因此 TCP、UDP、loopback、Unix-domain 与 netlink 等新 endpoint 均不能创建。
+
+`NetworkPolicy.ALLOW`：
+
+1. 检查 `socket` 和 `socketpair`；
+2. 第一个参数为 `AF_UNIX` 时返回 `EPERM`；
+3. 常规 IPv4/IPv6 syscall 放行。
 
 支持：
 
-| 架构 | audit arch | socket syscall | socketpair syscall |
-|---|---:|---:|---:|
-| x86_64 | `AUDIT_ARCH_X86_64` | 41 | 53 |
-| aarch64 | `AUDIT_ARCH_AARCH64` | 198 | 199 |
+| 架构 | audit arch | socket | socketpair | io_uring_setup |
+|---|---:|---:|---:|---:|
+| x86_64 | `AUDIT_ARCH_X86_64` | 41 | 53 | 425 |
+| aarch64 | `AUDIT_ARCH_AARCH64` | 198 | 199 | 425 |
 
 因此即使选择 `NetworkPolicy.ALLOW`，常规 TCP/UDP IP 网络可用，但 AF_UNIX 仍被拒绝。这是刻意的安全差异。
 
@@ -168,11 +178,11 @@ Linux 要求非特权进程在安装 seccomp filter 前设置 `no_new_privs`。�
 
 ### DENY
 
-`--unshare-net` 创建新的 network namespace。没有宿主物理接口和路由；namespace 内 loopback 语义仍属于内核本地行为。同时 seccomp 阻止 AF_UNIX。
+seccomp 拒绝 `socket`、`socketpair` 和 `io_uring_setup`。这包括 IP、loopback、Unix-domain 与 netlink socket。该保证依赖受信任 launcher 不向子进程泄漏预先打开的网络 fd；Java `ProcessBuilder` 只为本次执行传递标准流和 seccomp filter fd，bubblewrap 消费 filter fd 后再 exec 目标程序。
 
 ### ALLOW
 
-不创建 network namespace，因此保留宿主 IP 网络视图；seccomp 仍阻止 AF_UNIX。宿主 Firewall、代理和服务认证照常生效。
+保留宿主 IP 网络视图；seccomp 仍阻止 AF_UNIX 与 io_uring。宿主 Firewall、代理和服务认证照常生效。
 
 ## WSL2
 
@@ -189,6 +199,7 @@ WSL1 不具备相同内核隔离能力，不应假设此后端可以工作。
 
 - 与宿主共享内核，不能防御 kernel exploit；
 - 受限容器环境可能禁止 user namespace；
+- bubblewrap bootstrap 的 namespace/AppArmor 错误会转换成 `SandboxBackendUnavailableException`，不会无沙箱降级执行；
 - 当前 seccomp 不是通用 syscall allowlist；
 - 当前 SDK 不直接配置 cgroup CPU/内存配额；
 - writable root 中已有 hard link 仍可能指向同文件系统其他 inode；

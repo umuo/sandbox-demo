@@ -1,5 +1,6 @@
 package io.github.sandboxdemo.platform.linux;
 
+import io.github.sandboxdemo.api.NetworkPolicy;
 import io.github.sandboxdemo.api.SandboxBackendUnavailableException;
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -30,22 +31,13 @@ final class LinuxSeccompFilter {
 
     private LinuxSeccompFilter() {}
 
-    static Path write(Path directory) throws SandboxBackendUnavailableException {
+    static Path write(Path directory, NetworkPolicy networkPolicy)
+            throws SandboxBackendUnavailableException {
         Architecture architecture = Architecture.current();
         List<Instruction> instructions =
-                List.of(
-                        load(SECCOMP_DATA_ARCH_OFFSET),
-                        jump(architecture.auditArchitecture(), 1, 0),
-                        result(SECCOMP_RETURN_KILL_PROCESS),
-                        load(0),
-                        jump(architecture.socketSyscall(), 3, 0),
-                        jump(architecture.socketPairSyscall(), 0, 1),
-                        result(SECCOMP_RETURN_ERRNO | EPERM),
-                        result(SECCOMP_RETURN_ALLOW),
-                        load(SECCOMP_DATA_ARGUMENT_0_OFFSET),
-                        jump(AF_UNIX, 0, 1),
-                        result(SECCOMP_RETURN_ERRNO | EPERM),
-                        result(SECCOMP_RETURN_ALLOW));
+                networkPolicy == NetworkPolicy.DENY
+                        ? denyAllNetwork(architecture)
+                        : denyHostUnixSockets(architecture);
 
         ByteBuffer bytes =
                 ByteBuffer.allocate(instructions.size() * 8).order(ByteOrder.LITTLE_ENDIAN);
@@ -58,6 +50,39 @@ final class LinuxSeccompFilter {
             throw new SandboxBackendUnavailableException(
                     "failed to create the Linux seccomp policy: " + e.getMessage());
         }
+    }
+
+    private static List<Instruction> denyAllNetwork(Architecture architecture) {
+        return List.of(
+                load(SECCOMP_DATA_ARCH_OFFSET),
+                jump(architecture.auditArchitecture(), 1, 0),
+                result(SECCOMP_RETURN_KILL_PROCESS),
+                load(0),
+                jump(architecture.socketSyscall(), 0, 1),
+                result(SECCOMP_RETURN_ERRNO | EPERM),
+                jump(architecture.socketPairSyscall(), 0, 1),
+                result(SECCOMP_RETURN_ERRNO | EPERM),
+                jump(architecture.ioUringSetupSyscall(), 0, 1),
+                result(SECCOMP_RETURN_ERRNO | EPERM),
+                result(SECCOMP_RETURN_ALLOW));
+    }
+
+    private static List<Instruction> denyHostUnixSockets(Architecture architecture) {
+        return List.of(
+                load(SECCOMP_DATA_ARCH_OFFSET),
+                jump(architecture.auditArchitecture(), 1, 0),
+                result(SECCOMP_RETURN_KILL_PROCESS),
+                load(0),
+                jump(architecture.ioUringSetupSyscall(), 0, 1),
+                result(SECCOMP_RETURN_ERRNO | EPERM),
+                jump(architecture.socketSyscall(), 3, 0),
+                jump(architecture.socketPairSyscall(), 0, 1),
+                result(SECCOMP_RETURN_ERRNO | EPERM),
+                result(SECCOMP_RETURN_ALLOW),
+                load(SECCOMP_DATA_ARGUMENT_0_OFFSET),
+                jump(AF_UNIX, 0, 1),
+                result(SECCOMP_RETURN_ERRNO | EPERM),
+                result(SECCOMP_RETURN_ALLOW));
     }
 
     private static Instruction load(int offset) {
@@ -82,7 +107,11 @@ final class LinuxSeccompFilter {
         }
     }
 
-    private record Architecture(int auditArchitecture, int socketSyscall, int socketPairSyscall) {
+    private record Architecture(
+            int auditArchitecture,
+            int socketSyscall,
+            int socketPairSyscall,
+            int ioUringSetupSyscall) {
 
         private static final int AUDIT_ARCH_X86_64 = 0xC000003E;
         private static final int AUDIT_ARCH_AARCH64 = 0xC00000B7;
@@ -90,8 +119,8 @@ final class LinuxSeccompFilter {
         static Architecture current() throws SandboxBackendUnavailableException {
             String architecture = System.getProperty("os.arch", "").toLowerCase(Locale.ROOT);
             return switch (architecture) {
-                case "amd64", "x86_64" -> new Architecture(AUDIT_ARCH_X86_64, 41, 53);
-                case "aarch64", "arm64" -> new Architecture(AUDIT_ARCH_AARCH64, 198, 199);
+                case "amd64", "x86_64" -> new Architecture(AUDIT_ARCH_X86_64, 41, 53, 425);
+                case "aarch64", "arm64" -> new Architecture(AUDIT_ARCH_AARCH64, 198, 199, 425);
                 default ->
                         throw new SandboxBackendUnavailableException(
                                 "the Linux seccomp policy supports x86_64 and aarch64 only: "
