@@ -12,6 +12,7 @@ import io.github.sandboxdemo.api.SandboxResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.Locale;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
@@ -43,10 +44,25 @@ class WindowsProductionSandboxRunnerTest {
         SandboxResult allowedResult =
                 runner.execute(
                         SandboxRequest.of(
-                                policy, cmd("echo ok>\"" + allowed + "\" & echo %USERNAME%")));
+                                policy,
+                                cmd(
+                                        "echo ok>\""
+                                                + allowed
+                                                + "\" & \""
+                                                + systemExecutable("whoami.exe")
+                                                + "\"")));
         assertSuccessful(allowedResult);
         assertTrue(Files.exists(allowed));
-        assertTrue(allowedResult.stdoutUtf8().contains("AgentSbxOffline"));
+        // USERNAME is intentionally absent from the sanitized environment and is not an identity
+        // boundary. whoami reads the process access token that the sandbox actually enforces.
+        assertTrue(
+                allowedResult
+                        .stdoutUtf8()
+                        .toLowerCase(Locale.ROOT)
+                        .contains(
+                                WindowsSandboxInstallation.DEFAULT_OFFLINE_USER.toLowerCase(
+                                        Locale.ROOT)),
+                "unexpected sandbox identity: " + allowedResult.stdoutUtf8());
 
         Path blocked = outside.resolve("blocked.txt");
         SandboxResult blockedResult =
@@ -159,13 +175,12 @@ class WindowsProductionSandboxRunnerTest {
     }
 
     private static CommandSpec cmd(String command) {
+        return CommandSpec.of(systemExecutable("cmd.exe"), "/d", "/s", "/c", command);
+    }
+
+    private static String systemExecutable(String name) {
         String systemRoot = System.getenv().getOrDefault("SystemRoot", "C:\\Windows");
-        return CommandSpec.of(
-                java.nio.file.Paths.get(systemRoot, "System32", "cmd.exe").toString(),
-                "/d",
-                "/s",
-                "/c",
-                command);
+        return java.nio.file.Paths.get(systemRoot, "System32", name).toString();
     }
 
     private static CommandSpec powershell(String command) {
