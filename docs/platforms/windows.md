@@ -188,13 +188,13 @@ worker 从自身 token 创建 restricted token，然后用 `CreateProcessAsUserW
 
 目标进程先以 `CREATE_SUSPENDED` 创建，完成 Job Object 绑定后才 `ResumeThread`，避免它在进入进程树边界前抢跑。
 
-## Private Desktop
+## Window Station 与 Private Desktop
 
 Windows desktop 是 Win32 窗口和消息的隔离对象，不是显示器桌面壁纸的概念。低权限程序若与高权限程序共享默认 desktop，可能尝试通过窗口消息交互。
 
-本项目为每次目标执行调用 `CreateDesktopW` 创建随机 private desktop，并在 `STARTUPINFO.lpDesktop` 指定它。Microsoft 的 restricted-token 文档也建议受限应用不要与不受限应用共享默认 desktop。
+本项目在当前 window station 上为每个本次 capability SID 添加短期 `GENERIC_ALL` ACE，再调用 `CreateDesktopW` 创建随机 private desktop，并在 `STARTUPINFO.lpDesktop` 指定 window station 的真实名称和该 desktop。执行结束后会撤销 window station ACE；即使异常退出留下 ACE，随机 SID 也不会被后续 token 重用。window station 和 desktop 都授权 capability SID，才能让 `WRITE_RESTRICTED` token 的双重访问检查通过。Microsoft 的 restricted-token 文档也建议受限应用不要与不受限应用共享默认 desktop。
 
-Private Desktop 解决 UI/message 隔离，不解决文件权限、网络或 CPU 限制。
+Private desktop 解决 UI/message 隔离，不解决文件权限、网络或 CPU 限制。
 
 ## Job Object
 

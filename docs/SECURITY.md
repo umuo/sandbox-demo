@@ -42,7 +42,7 @@ Command parsing is not a security boundary. Every child is launched under an OS-
 - Declared readable-root ACEs for the dedicated accounts are persistent until uninstall; callers must select readable roots from a trusted service-side allowlist rather than pass arbitrary model input.
 - UNC, non-NTFS and reparse-point policy paths are rejected. Important path objects are opened without delete sharing and retained through execution.
 - The worker verifies its actual account SID and consumes a sealed, bounded, versioned request file from a protected session directory. Sealing denies only concrete mutation rights (not the overlapping generic read/control bits) and retains a host read handle without write/delete sharing.
-- The target is created suspended with an explicit application path, environment block and inherited-handle allowlist. It receives a private desktop before resume.
+- The target is created suspended with an explicit application path, environment block and inherited-handle allowlist. It receives a private desktop before resume; the current window station and private desktop both receive short-lived per-command capability ACEs.
 - The worker and target each have a kill-on-close Job Object. The target Job also limits active processes (default 64) and aggregate Job memory (default 2048 MiB).
 
 ## Deliberate limitations

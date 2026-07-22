@@ -44,7 +44,7 @@ class WindowsProductionSandboxRunnerTest {
                 runner.execute(
                         SandboxRequest.of(
                                 policy, cmd("echo ok>\"" + allowed + "\" & echo %USERNAME%")));
-        assertTrue(allowedResult.successful(), allowedResult.stderrUtf8());
+        assertSuccessful(allowedResult);
         assertTrue(Files.exists(allowed));
         assertTrue(allowedResult.stdoutUtf8().contains("AgentSbxOffline"));
 
@@ -66,7 +66,7 @@ class WindowsProductionSandboxRunnerTest {
                                 policy,
                                 cmd("if defined SECRET_TEST_VALUE (exit /b 9) else (exit /b 0)"),
                                 io.github.sandboxdemo.core.Java8.mapOf()));
-        assertTrue(environmentResult.successful(), environmentResult.stderrUtf8());
+        assertSuccessful(environmentResult);
 
         SandboxResult stdinResult =
                 runner.execute(
@@ -75,7 +75,7 @@ class WindowsProductionSandboxRunnerTest {
                                 powershell("[Console]::Out.Write([Console]::In.ReadToEnd())"),
                                 io.github.sandboxdemo.core.Java8.mapOf(),
                                 "sdk-stdin".getBytes(java.nio.charset.StandardCharsets.UTF_8)));
-        assertTrue(stdinResult.successful(), stdinResult.stderrUtf8());
+        assertSuccessful(stdinResult);
         assertTrue(stdinResult.stdoutUtf8().contains("sdk-stdin"));
 
         SandboxPolicy timeoutPolicy =
@@ -150,11 +150,11 @@ class WindowsProductionSandboxRunnerTest {
                                 policy,
                                 cmd("type \"" + readableAppData.resolve("input.txt") + "\"")));
 
-        assertTrue(allowedResult.successful(), allowedResult.stderrUtf8());
+        assertSuccessful(allowedResult);
         assertTrue(Files.exists(allowed));
         assertFalse(blockedResult.successful());
         assertFalse(Files.exists(blocked));
-        assertTrue(readResult.successful(), readResult.stderrUtf8());
+        assertSuccessful(readResult);
         assertTrue(readResult.stdoutUtf8().contains("read-ok"));
     }
 
@@ -183,5 +183,16 @@ class WindowsProductionSandboxRunnerTest {
                 "-NonInteractive",
                 "-Command",
                 command);
+    }
+
+    private static void assertSuccessful(SandboxResult result) {
+        assertTrue(
+                result.successful(),
+                "exitCode="
+                        + result.exitCode()
+                        + ", timedOut="
+                        + result.timedOut()
+                        + ", stderr="
+                        + result.stderrUtf8());
     }
 }

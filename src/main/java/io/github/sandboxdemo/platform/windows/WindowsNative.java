@@ -126,6 +126,25 @@ final class WindowsNative {
                 Pointer dacl,
                 Pointer sacl);
 
+        int GetSecurityInfo(
+                Pointer handle,
+                int objectType,
+                int securityInfo,
+                PointerByReference owner,
+                PointerByReference group,
+                PointerByReference dacl,
+                PointerByReference sacl,
+                PointerByReference securityDescriptor);
+
+        int SetSecurityInfo(
+                Pointer handle,
+                int objectType,
+                int securityInfo,
+                Pointer owner,
+                Pointer group,
+                Pointer dacl,
+                Pointer sacl);
+
         int SetEntriesInAclW(
                 int explicitEntryCount,
                 EXPLICIT_ACCESS explicitEntries,
@@ -172,6 +191,11 @@ final class WindowsNative {
 
     interface User32 extends StdCallLibrary {
         User32 INSTANCE = Native.load("user32", User32.class, W32APIOptions.UNICODE_OPTIONS);
+
+        Pointer GetProcessWindowStation();
+
+        boolean GetUserObjectInformationW(
+                Pointer object, int index, Pointer information, int length, IntByReference needed);
 
         Pointer CreateDesktopW(
                 WString desktop,
