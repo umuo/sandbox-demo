@@ -192,6 +192,14 @@ restricted token 中触发第二次访问检查的 SID。正常 SID 检查和 re
 
 只在写访问时考虑 restricting SID 的 token 标志。它带来兼容的宽读限写模型，但不能构造严格读取白名单。
 
+### Write Restricted Code SID
+
+Windows well-known SID `S-1-5-33`。系统对象可以向它显式授权，让 write-restricted token 在不放宽普通文件 ACL 的情况下使用必要的初始化或 IPC 对象。
+
+### Logon-session SID
+
+Windows 为一次登录会话生成的 SID，常见形式为 `S-1-5-5-X-Y`。`BaseNamedObjects` 等会话级对象使用它授权；它不同于用户 SID，也不同于本项目生成的文件 capability SID。
+
 ### `DISABLE_MAX_PRIVILEGE`
 
 移除新 token 中大多数 privilege 的标志。

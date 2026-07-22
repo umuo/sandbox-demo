@@ -41,6 +41,15 @@ final class WindowsRestrictedProcessLauncher {
 
     private static final int DISABLE_MAX_PRIVILEGE = 0x00000001;
     private static final int WRITE_RESTRICTED = 0x00000008;
+    private static final String WRITE_RESTRICTED_CODE_SID = "S-1-5-33";
+    private static final int TOKEN_GROUPS = 2;
+    private static final int TOKEN_DEFAULT_DACL = 6;
+    private static final int SE_GROUP_LOGON_ID = 0xC0000000;
+    private static final int GENERIC_ALL = 0x10000000;
+    private static final int GRANT_ACCESS = 1;
+    private static final int NO_MULTIPLE_TRUSTEE = 0;
+    private static final int TRUSTEE_IS_SID = 0;
+    private static final int TRUSTEE_IS_UNKNOWN = 0;
 
     private static final int HANDLE_FLAG_INHERIT = 0x00000001;
     private static final int STARTF_USESTDHANDLES = 0x00000100;
@@ -90,10 +99,11 @@ final class WindowsRestrictedProcessLauncher {
 
         try {
             baseToken = openCurrentToken();
-            for (String sid : capabilitySids) {
+            for (String sid : restrictionSids(capabilitySids, currentLogonSid(baseToken))) {
                 convertedSids.add(convertSid(sid));
             }
             restrictedToken = createRestrictedToken(baseToken, convertedSids);
+            addSidsToDefaultDacl(restrictedToken, convertedSids);
             desktop = WindowsPrivateDesktop.create(currentUserSid(), capabilitySids);
 
             WindowsNative.SECURITY_ATTRIBUTES inheritable = inheritableAttributes();
@@ -305,10 +315,8 @@ final class WindowsRestrictedProcessLauncher {
         }
 
         PointerByReference restricted = new PointerByReference();
-        // LUA_TOKEN is UAC filtering, not a general sandbox restriction. In particular, applying
-        // it to a primary token that was not built as one half of a UAC split token can leave a
-        // CreateProcessAsUserW child unable to finish DLL initialization. Privilege removal and
-        // the capability-SID write check are provided independently by these two flags.
+        // LUA_TOKEN is UAC filtering, not a general sandbox restriction. Privilege removal and the
+        // capability-SID write check are provided independently by these two flags.
         int flags = DISABLE_MAX_PRIVILEGE | WRITE_RESTRICTED;
         if (!Advapi32.INSTANCE.CreateRestrictedToken(
                 base,
@@ -323,6 +331,126 @@ final class WindowsRestrictedProcessLauncher {
             throw win32("CreateRestrictedToken");
         }
         return restricted.getValue();
+    }
+
+    static List<String> restrictionSids(List<String> capabilitySids, String logonSid) {
+        List<String> result = new ArrayList<>(capabilitySids);
+        // BaseNamedObjects and other per-logon resources grant the logon SID rather than the user
+        // or a synthetic file capability SID.
+        result.add(logonSid);
+        // Windows grants selected initialization and IPC objects to this well-known SID. It lets a
+        // write-restricted process initialize without granting the SID on ordinary filesystem
+        // locations; writable roots continue to receive only per-execution capability ACEs.
+        result.add(WRITE_RESTRICTED_CODE_SID);
+        return result;
+    }
+
+    private static String currentLogonSid(Pointer token) throws SandboxException {
+        IntByReference required = new IntByReference();
+        Advapi32.INSTANCE.GetTokenInformation(token, TOKEN_GROUPS, null, 0, required);
+        if (required.getValue() <= 0) {
+            throw win32("GetTokenInformation(TokenGroups size)");
+        }
+
+        Memory tokenGroups = new Memory(required.getValue());
+        if (!Advapi32.INSTANCE.GetTokenInformation(
+                token, TOKEN_GROUPS, tokenGroups, (int) tokenGroups.size(), required)) {
+            throw win32("GetTokenInformation(TokenGroups)");
+        }
+
+        int groupCount = tokenGroups.getInt(0);
+        long firstGroupOffset = Native.POINTER_SIZE == Long.BYTES ? 8L : 4L;
+        long groupSize = Native.POINTER_SIZE == Long.BYTES ? 16L : 8L;
+        if (groupCount < 0
+                || (long) groupCount * groupSize > tokenGroups.size() - firstGroupOffset) {
+            throw new SandboxException("invalid TOKEN_GROUPS returned for current token");
+        }
+        for (int i = 0; i < groupCount; i++) {
+            long groupOffset = firstGroupOffset + (long) i * groupSize;
+            int attributes = tokenGroups.getInt(groupOffset + Native.POINTER_SIZE);
+            if ((attributes & SE_GROUP_LOGON_ID) == SE_GROUP_LOGON_ID) {
+                return sidToString(tokenGroups.getPointer(groupOffset));
+            }
+        }
+        throw new SandboxException("current Windows token has no logon-session SID");
+    }
+
+    private static String sidToString(Pointer sid) throws SandboxException {
+        PointerByReference converted = new PointerByReference();
+        if (!Advapi32.INSTANCE.ConvertSidToStringSidW(sid, converted)) {
+            throw win32("ConvertSidToStringSidW(logon SID)");
+        }
+        try {
+            return converted.getValue().getWideString(0);
+        } finally {
+            Kernel32.INSTANCE.LocalFree(converted.getValue());
+        }
+    }
+
+    private static void addSidsToDefaultDacl(Pointer token, List<Pointer> sids)
+            throws SandboxException {
+        IntByReference required = new IntByReference();
+        Advapi32.INSTANCE.GetTokenInformation(token, TOKEN_DEFAULT_DACL, null, 0, required);
+        if (required.getValue() < Native.POINTER_SIZE) {
+            throw win32("GetTokenInformation(TokenDefaultDacl size)");
+        }
+
+        Memory tokenInformation = new Memory(required.getValue());
+        if (!Advapi32.INSTANCE.GetTokenInformation(
+                token,
+                TOKEN_DEFAULT_DACL,
+                tokenInformation,
+                (int) tokenInformation.size(),
+                required)) {
+            throw win32("GetTokenInformation(TokenDefaultDacl)");
+        }
+        Pointer currentAcl = tokenInformation.getPointer(0);
+        if (currentAcl == null) {
+            throw new SandboxException(
+                    "refusing to use a restricted token with a NULL default DACL");
+        }
+
+        Pointer allocatedAcl = null;
+        try {
+            for (Pointer sid : sids) {
+                WindowsNative.EXPLICIT_ACCESS entry = new WindowsNative.EXPLICIT_ACCESS();
+                entry.grfAccessPermissions = GENERIC_ALL;
+                entry.grfAccessMode = GRANT_ACCESS;
+                entry.grfInheritance = 0;
+                entry.Trustee.pMultipleTrustee = null;
+                entry.Trustee.MultipleTrusteeOperation = NO_MULTIPLE_TRUSTEE;
+                entry.Trustee.TrusteeForm = TRUSTEE_IS_SID;
+                entry.Trustee.TrusteeType = TRUSTEE_IS_UNKNOWN;
+                entry.Trustee.ptstrName = sid;
+                entry.Trustee.write();
+                entry.write();
+
+                PointerByReference updatedAcl = new PointerByReference();
+                int mergeError =
+                        Advapi32.INSTANCE.SetEntriesInAclW(1, entry, currentAcl, updatedAcl);
+                if (mergeError != 0) {
+                    throw win32("SetEntriesInAclW(TokenDefaultDacl)", mergeError);
+                }
+                Pointer previousAllocatedAcl = allocatedAcl;
+                allocatedAcl = updatedAcl.getValue();
+                currentAcl = allocatedAcl;
+                if (previousAllocatedAcl != null) {
+                    Kernel32.INSTANCE.LocalFree(previousAllocatedAcl);
+                }
+            }
+
+            WindowsNative.TOKEN_DEFAULT_DACL defaultDacl = new WindowsNative.TOKEN_DEFAULT_DACL();
+            defaultDacl.DefaultDacl = currentAcl;
+            defaultDacl.write();
+            if (!Advapi32.INSTANCE.SetTokenInformation(
+                    token, TOKEN_DEFAULT_DACL, defaultDacl.getPointer(), defaultDacl.size())) {
+                throw win32("SetTokenInformation(TokenDefaultDacl)");
+            }
+        } finally {
+            if (allocatedAcl != null) {
+                Kernel32.INSTANCE.LocalFree(allocatedAcl);
+            }
+        }
     }
 
     private static WindowsNative.SECURITY_ATTRIBUTES inheritableAttributes() {

@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.sun.jna.Native;
 import com.sun.jna.NativeMappedConverter;
 import java.lang.reflect.Modifier;
+import java.util.Arrays;
 import org.junit.jupiter.api.Test;
 
 class WindowsNativeStructureTest {
@@ -17,6 +18,7 @@ class WindowsNativeStructureTest {
 
         assertEquals(expectedTrusteeSize, new WindowsNative.TRUSTEE().size());
         assertEquals(expectedExplicitAccessSize, new WindowsNative.EXPLICIT_ACCESS().size());
+        assertEquals(Native.POINTER_SIZE, new WindowsNative.TOKEN_DEFAULT_DACL().size());
     }
 
     @Test
@@ -24,6 +26,17 @@ class WindowsNativeStructureTest {
         assertTrue(
                 WindowsCapabilitySid.random()
                         .matches("S-1-5-21-(?:[1-9][0-9]{0,9}-){3}[1-9][0-9]{0,9}"));
+    }
+
+    @Test
+    void restrictedTokenIncludesCapabilityAndWindowsWriteRestrictedSid() {
+        String capability = "S-1-5-21-1-2-3-4";
+        String logonSid = "S-1-5-5-123-456";
+
+        assertEquals(
+                Arrays.asList(capability, logonSid, "S-1-5-33"),
+                WindowsRestrictedProcessLauncher.restrictionSids(
+                        java.util.Collections.singletonList(capability), logonSid));
     }
 
     @Test

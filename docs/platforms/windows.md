@@ -92,9 +92,13 @@ DISABLE_MAX_PRIVILEGE | WRITE_RESTRICTED
 
 让 restricting SID 只参与写访问检查。这是当前 Windows 后端“广泛读取、限制写入”的核心。
 
+token 的 restricting SID 列表包含每次执行生成的 capability SID、当前 logon-session SID，以及 Windows 专门定义的 Write Restricted Code SID `S-1-5-33`。`BaseNamedObjects` 等每次登录资源使用 logon-session SID，部分系统初始化和 IPC 对象则会向 `S-1-5-33` 授权；两者共同保证 write-restricted 进程可以完成启动。普通文件目录不会因为 token 包含这些 SID 而自动获得授权，仍然必须存在匹配的 ACE，并且账户 SID 的第一次访问检查也必须通过。
+
+创建 restricted token 后，SDK 还会把这些 restricting SID 合并进 token default DACL。否则目标进程按默认安全描述符创建自己的内核对象后，可能在第二次访问检查中无法重新打开或写入它们，最终在进入命令代码前以 `STATUS_DLL_INIT_FAILED (0xC0000142)` 退出。
+
 ### 为什么不使用 `LUA_TOKEN`
 
-`LUA_TOKEN` 用于构造 UAC/Limited User Account 风格的过滤 token，不是通用沙箱限制。生产后端已经使用专用非管理员账户；开发后端和生产后端的写边界都由 `DISABLE_MAX_PRIVILEGE`、restricting SID 与 `WRITE_RESTRICTED` 共同提供。把 `LUA_TOKEN` 叠加到普通 primary token 上会引入依赖 UAC 特定 token 状态的启动语义，并可能让 `CreateProcessAsUserW` 创建的进程在 DLL 初始化阶段直接退出。因此这里明确不启用它。
+`LUA_TOKEN` 用于构造 UAC/Limited User Account 风格的过滤 token，不是通用沙箱限制。生产后端已经使用专用非管理员账户；开发后端和生产后端的写边界都由 `DISABLE_MAX_PRIVILEGE`、restricting SID 与 `WRITE_RESTRICTED` 共同提供，因此这里不启用它。
 
 Windows 会对写访问执行两次判断：
 

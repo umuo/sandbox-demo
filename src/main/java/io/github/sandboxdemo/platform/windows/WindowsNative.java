@@ -99,7 +99,22 @@ final class WindowsNative {
         boolean OpenProcessToken(
                 Pointer processHandle, int desiredAccess, PointerByReference tokenHandle);
 
+        boolean GetTokenInformation(
+                Pointer tokenHandle,
+                int tokenInformationClass,
+                Pointer tokenInformation,
+                int tokenInformationLength,
+                IntByReference returnLength);
+
+        boolean SetTokenInformation(
+                Pointer tokenHandle,
+                int tokenInformationClass,
+                Pointer tokenInformation,
+                int tokenInformationLength);
+
         boolean ConvertStringSidToSidW(WString stringSid, PointerByReference sid);
+
+        boolean ConvertSidToStringSidW(Pointer sid, PointerByReference stringSid);
 
         boolean ConvertStringSecurityDescriptorToSecurityDescriptorW(
                 WString stringSecurityDescriptor,
@@ -239,6 +254,11 @@ final class WindowsNative {
     public static class SID_AND_ATTRIBUTES extends Structure {
         public Pointer Sid;
         public int Attributes;
+    }
+
+    @Structure.FieldOrder({"DefaultDacl"})
+    public static class TOKEN_DEFAULT_DACL extends Structure {
+        public Pointer DefaultDacl;
     }
 
     @Structure.FieldOrder({
