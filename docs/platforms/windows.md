@@ -92,9 +92,9 @@ DISABLE_MAX_PRIVILEGE | WRITE_RESTRICTED
 
 让 restricting SID 只参与写访问检查。这是当前 Windows 后端“广泛读取、限制写入”的核心。
 
-token 的 restricting SID 列表包含每次执行生成的 capability SID、专用 sandbox 账户 SID、Everyone SID `S-1-1-0`、当前 logon-session SID，以及 Windows 专门定义的 Write Restricted Code SID `S-1-5-33`。用户 profile 注册表和加密对象通常向账户 SID 授权，`BaseNamedObjects` 等每次登录资源使用 logon-session SID，部分系统初始化和 IPC 对象会向 `S-1-5-33` 授权，而 CLR、Windows PowerShell 等通用 Win32 工具还会访问只向 Everyone 授权的共享系统对象。缺少 Everyone 会让 PowerShell 以 `Starting the CLR failed with HRESULT 80070005` 退出；缺少账户 SID 或未加载 profile 则可能以 `Loading managed Windows PowerShell failed with error 8009001d` 退出。
+生产 token 的 restricting SID 列表包含每次执行生成的 capability SID、专用 sandbox 账户 SID、Everyone SID `S-1-1-0`、当前 logon-session SID，以及 Windows 专门定义的 Write Restricted Code SID `S-1-5-33`。用户 profile 注册表和加密对象通常向账户 SID 授权，`BaseNamedObjects` 等每次登录资源使用 logon-session SID，部分系统初始化和 IPC 对象会向 `S-1-5-33` 授权，而 CLR、Windows PowerShell 等通用 Win32 工具还会访问只向 Everyone 授权的共享系统对象。缺少 Everyone 会让 PowerShell 以 `Starting the CLR failed with HRESULT 80070005` 退出；缺少账户 SID、登录环境或未加载 profile 则可能以 `Loading managed Windows PowerShell failed with error 8009001d` 退出。
 
-这些兼容 SID 仍然需要账户 SID 的第一次访问检查和对象 DACL 中的匹配 ACE。专用账户 SID 让该隔离账户自己的 profile 可写；Everyone 则意味着宿主上本来就向 Everyone 开放写权限的位置仍可写。生产宿主不得在 sandbox 账户 profile 中存放可信数据，也不得把安全敏感目录配置成 world-writable；除此之外，workspace 写边界由随机 capability SID 及 protected-path deny ACE 提供。
+这些兼容 SID 仍然需要账户 SID 的第一次访问检查和对象 DACL 中的匹配 ACE。专用账户 SID 让该隔离账户自己的 profile 可写；Everyone 则意味着宿主上本来就向 Everyone 开放写权限的位置仍可写。生产宿主不得在 sandbox 账户 profile 中存放可信数据，也不得把安全敏感目录配置成 world-writable；除此之外，workspace 写边界由随机 capability SID 及 protected-path deny ACE 提供。开发用 `WindowsRestrictedTokenSandboxRunner` 不加入真实宿主 user SID，否则宿主用户可写的 sibling 路径也会通过第二次检查。
 
 创建 restricted token 后，SDK 还会把这些 restricting SID 合并进 token default DACL。否则目标进程按默认安全描述符创建自己的内核对象后，可能在第二次访问检查中无法重新打开或写入它们，最终在进入命令代码前以 `STATUS_DLL_INIT_FAILED (0xC0000142)` 退出。
 
@@ -182,7 +182,7 @@ SandboxRequest request = SandboxRequest.builder(project, powershell)
 
 ### `CreateProcessWithLogonW`
 
-Java Agent 使用专用账户的用户名和 DPAPI 解密后的密码启动可信 worker，并向 `CreateProcessWithLogonW` 传入 `LOGON_WITH_PROFILE`。此时 worker 已经处于专用本地用户身份，其 HKCU profile hive 会保持加载到 worker 退出，供 CLR、PowerShell 和加密提供程序正常初始化。profile 属于隔离用账户，不得存放宿主可信数据。
+Java Agent 使用专用账户的用户名和 DPAPI 解密后的密码启动可信 worker，并向 `CreateProcessWithLogonW` 传入 `LOGON_WITH_PROFILE`。此时 worker 已经处于专用本地用户身份，其 HKCU profile hive 会保持加载到 worker 退出。worker 再用自身 token 调用 `CreateEnvironmentBlock`，只保留 `APPDATA`、`LOCALAPPDATA`、`ProgramData`、`PSModulePath` 等 Windows 运行时结构变量，然后叠加 SDK 管理的目录和请求显式环境；宿主 Agent 的 API Key 等环境不会进入目标进程。profile 属于隔离用账户，不得存放宿主可信数据。
 
 ### Worker 身份校验
 

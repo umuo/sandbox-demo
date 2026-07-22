@@ -29,7 +29,7 @@ class WindowsNativeStructureTest {
     }
 
     @Test
-    void restrictedTokenIncludesCapabilityAndWindowsCompatibilitySids() {
+    void productionRestrictedTokenIncludesDedicatedUserAndCompatibilitySids() {
         String capability = "S-1-5-21-1-2-3-4";
         String userSid = "S-1-5-21-5-6-7-8";
         String logonSid = "S-1-5-5-123-456";
@@ -37,7 +37,19 @@ class WindowsNativeStructureTest {
         assertEquals(
                 Arrays.asList(capability, userSid, logonSid, "S-1-1-0", "S-1-5-33"),
                 WindowsRestrictedProcessLauncher.restrictionSids(
-                        java.util.Collections.singletonList(capability), userSid, logonSid));
+                        java.util.Collections.singletonList(capability), userSid, logonSid, true));
+    }
+
+    @Test
+    void developmentRestrictedTokenDoesNotUseHostUserAsAWriteCapability() {
+        String capability = "S-1-5-21-1-2-3-4";
+        String userSid = "S-1-5-21-5-6-7-8";
+        String logonSid = "S-1-5-5-123-456";
+
+        assertEquals(
+                Arrays.asList(capability, logonSid, "S-1-1-0", "S-1-5-33"),
+                WindowsRestrictedProcessLauncher.restrictionSids(
+                        java.util.Collections.singletonList(capability), userSid, logonSid, false));
     }
 
     @Test

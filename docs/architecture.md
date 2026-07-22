@@ -87,7 +87,7 @@ PATH PATHEXT SystemRoot WINDIR ComSpec LANG LC_ALL TZ TERM
 
 `TEMP`、`TMP`、`TMPDIR`、`HOME`、`USERPROFILE`、`XDG_CACHE_HOME` 由 SDK 管理。API Key、云凭据和数据库密码不会因为宿主进程拥有它们而自动进入沙箱。
 
-`USERNAME`、`USER`、`USERDOMAIN` 等展示性环境变量也不会由 SDK 自动合成，不能用作授权或身份断言。Windows 上需要确认实际身份时，应读取进程 access token（例如使用系统 `whoami.exe`）。
+`USERNAME`、`USER`、`USERDOMAIN` 等展示性环境变量不会从宿主 Agent 直接复制。Windows 生产后端可能从专用账户的登录环境补入对应值，但它们仍不能用作授权或身份断言；需要确认实际身份时，应读取进程 access token（例如使用系统 `whoami.exe`）。
 
 ### 4. 选择 Strategy
 

@@ -223,6 +223,15 @@ final class WindowsNative {
         boolean CloseDesktop(Pointer desktop);
     }
 
+    interface Userenv extends StdCallLibrary {
+        Userenv INSTANCE = Native.load("userenv", Userenv.class, W32APIOptions.UNICODE_OPTIONS);
+
+        boolean CreateEnvironmentBlock(
+                PointerByReference environment, Pointer token, boolean inheritCurrentEnvironment);
+
+        boolean DestroyEnvironmentBlock(Pointer environment);
+    }
+
     @Structure.FieldOrder({"nLength", "lpSecurityDescriptor", "bInheritHandle"})
     public static class SECURITY_ATTRIBUTES extends Structure {
         public int nLength;

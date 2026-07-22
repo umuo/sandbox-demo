@@ -41,7 +41,8 @@ public final class WindowsSandboxWorker {
                             request.standardInput(),
                             request.policy(),
                             request.environment(),
-                            request.capabilitySids());
+                            request.capabilitySids(),
+                            true);
             WindowsWorkerProtocol.writeResult(resultFile, result, null);
         } catch (Throwable error) {
             try {

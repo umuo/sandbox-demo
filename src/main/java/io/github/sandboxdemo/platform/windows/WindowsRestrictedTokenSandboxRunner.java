@@ -59,7 +59,8 @@ public final class WindowsRestrictedTokenSandboxRunner implements SandboxRunner 
                         request.standardInput(),
                         policy,
                         environment,
-                        acl.capabilitySids());
+                        acl.capabilitySids(),
+                        false);
             }
         } finally {
             PathPolicyValidator.cleanup(policy);

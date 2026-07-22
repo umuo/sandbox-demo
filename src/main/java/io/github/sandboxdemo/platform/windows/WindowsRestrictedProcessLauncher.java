@@ -2,6 +2,7 @@ package io.github.sandboxdemo.platform.windows;
 
 import static io.github.sandboxdemo.platform.windows.WindowsNative.Advapi32;
 import static io.github.sandboxdemo.platform.windows.WindowsNative.Kernel32;
+import static io.github.sandboxdemo.platform.windows.WindowsNative.Userenv;
 
 import com.sun.jna.Memory;
 import com.sun.jna.Native;
@@ -18,9 +19,14 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -70,6 +76,7 @@ final class WindowsRestrictedProcessLauncher {
     private static final int WAIT_TIMEOUT = 258;
     private static final int ERROR_BROKEN_PIPE = 109;
     private static final int ERROR_NO_DATA = 232;
+    private static final Set<String> WINDOWS_RUNTIME_ENVIRONMENT = windowsRuntimeEnvironmentNames();
 
     private WindowsRestrictedProcessLauncher() {}
 
@@ -79,7 +86,8 @@ final class WindowsRestrictedProcessLauncher {
             byte[] standardInput,
             ValidatedPolicy policy,
             Map<String, String> environment,
-            List<String> capabilitySids)
+            List<String> capabilitySids,
+            boolean allowUserProfileWrites)
             throws SandboxException, InterruptedException {
 
         long started = System.nanoTime();
@@ -97,17 +105,23 @@ final class WindowsRestrictedProcessLauncher {
         WindowsNative.PROCESS_INFORMATION processInfo = null;
         ExecutorService readers = null;
         WindowsPrivateDesktop desktop = null;
+        Map<String, String> completeEnvironment = null;
 
         try {
             baseToken = openCurrentToken();
             String userSid = currentUserSid();
             for (String sid :
-                    restrictionSids(capabilitySids, userSid, currentLogonSid(baseToken))) {
+                    restrictionSids(
+                            capabilitySids,
+                            userSid,
+                            currentLogonSid(baseToken),
+                            allowUserProfileWrites)) {
                 convertedSids.add(convertSid(sid));
             }
             restrictedToken = createRestrictedToken(baseToken, convertedSids);
             addSidsToDefaultDacl(restrictedToken, convertedSids);
             desktop = WindowsPrivateDesktop.create(userSid, capabilitySids);
+            completeEnvironment = completeWindowsEnvironment(baseToken, environment);
 
             WindowsNative.SECURITY_ATTRIBUTES inheritable = inheritableAttributes();
             Pointer[] stdout = createPipe(inheritable);
@@ -138,7 +152,7 @@ final class WindowsRestrictedProcessLauncher {
 
             String commandLine = WindowsCommandLine.build(executable.toString(), arguments);
             Memory commandLineMemory = WindowsNative.wideString(commandLine);
-            Memory environmentBlock = environmentBlock(environment);
+            Memory environmentBlock = environmentBlock(completeEnvironment);
             processInfo = new WindowsNative.PROCESS_INFORMATION();
 
             boolean created =
@@ -337,11 +351,17 @@ final class WindowsRestrictedProcessLauncher {
     }
 
     static List<String> restrictionSids(
-            List<String> capabilitySids, String userSid, String logonSid) {
+            List<String> capabilitySids,
+            String userSid,
+            String logonSid,
+            boolean allowUserProfileWrites) {
         List<String> result = new ArrayList<>(capabilitySids);
-        // User-profile registry and cryptographic objects grant the dedicated account SID. This
-        // does not expose the host user's profile because the target runs as a separate account.
-        result.add(userSid);
+        if (allowUserProfileWrites) {
+            // Production uses a disposable dedicated account, so its profile is sandbox runtime
+            // state. The development backend must not add the real host user's SID here: doing so
+            // would make every host path writable by that user pass the restricting-SID check.
+            result.add(userSid);
+        }
         // BaseNamedObjects and other per-logon resources grant the logon SID rather than the user
         // or a synthetic file capability SID.
         result.add(logonSid);
@@ -355,6 +375,90 @@ final class WindowsRestrictedProcessLauncher {
         // locations; writable roots continue to receive only per-execution capability ACEs.
         result.add(WRITE_RESTRICTED_CODE_SID);
         return result;
+    }
+
+    private static Map<String, String> completeWindowsEnvironment(
+            Pointer token, Map<String, String> sandboxEnvironment) throws SandboxException {
+        PointerByReference created = new PointerByReference();
+        if (!Userenv.INSTANCE.CreateEnvironmentBlock(created, token, false)) {
+            throw win32("CreateEnvironmentBlock");
+        }
+        Pointer block = created.getValue();
+        if (block == null) {
+            throw new SandboxException("CreateEnvironmentBlock returned a NULL environment");
+        }
+
+        Map<String, String> result = new LinkedHashMap<>();
+        try {
+            long offset = 0;
+            int entries = 0;
+            while (true) {
+                String entry = block.getWideString(offset);
+                if (entry.isEmpty()) {
+                    break;
+                }
+                if (++entries > 4096 || offset > 1024L * 1024L) {
+                    throw new SandboxException(
+                            "Windows user environment block is unreasonably large");
+                }
+                int separator = entry.indexOf('=');
+                if (separator > 0) {
+                    String name = entry.substring(0, separator);
+                    if (WINDOWS_RUNTIME_ENVIRONMENT.contains(name)) {
+                        result.put(name, entry.substring(separator + 1));
+                    }
+                }
+                offset += (long) (entry.length() + 1) * Native.WCHAR_SIZE;
+            }
+        } finally {
+            Userenv.INSTANCE.DestroyEnvironmentBlock(block);
+        }
+
+        sandboxEnvironment.forEach(
+                (name, value) -> {
+                    result.keySet().removeIf(existing -> existing.equalsIgnoreCase(name));
+                    result.put(name, value);
+                });
+        return io.github.sandboxdemo.core.Java8.copyMap(result);
+    }
+
+    private static Set<String> windowsRuntimeEnvironmentNames() {
+        Set<String> names = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
+        names.addAll(
+                Arrays.asList(
+                        "ALLUSERSPROFILE",
+                        "APPDATA",
+                        "CommonProgramFiles",
+                        "CommonProgramFiles(x86)",
+                        "CommonProgramW6432",
+                        "COMPUTERNAME",
+                        "ComSpec",
+                        "HOMEDRIVE",
+                        "HOMEPATH",
+                        "LOCALAPPDATA",
+                        "LOGONSERVER",
+                        "NUMBER_OF_PROCESSORS",
+                        "OS",
+                        "Path",
+                        "PATHEXT",
+                        "PROCESSOR_ARCHITECTURE",
+                        "PROCESSOR_IDENTIFIER",
+                        "PROCESSOR_LEVEL",
+                        "PROCESSOR_REVISION",
+                        "ProgramData",
+                        "ProgramFiles",
+                        "ProgramFiles(x86)",
+                        "ProgramW6432",
+                        "PSModulePath",
+                        "PUBLIC",
+                        "SystemDrive",
+                        "SystemRoot",
+                        "USERDOMAIN",
+                        "USERDOMAIN_ROAMINGPROFILE",
+                        "USERNAME",
+                        "USERPROFILE",
+                        "windir"));
+        return Collections.unmodifiableSet(names);
     }
 
     private static String currentLogonSid(Pointer token) throws SandboxException {
