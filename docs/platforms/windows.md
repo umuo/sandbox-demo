@@ -92,7 +92,9 @@ DISABLE_MAX_PRIVILEGE | WRITE_RESTRICTED
 
 让 restricting SID 只参与写访问检查。这是当前 Windows 后端“广泛读取、限制写入”的核心。
 
-token 的 restricting SID 列表包含每次执行生成的 capability SID、当前 logon-session SID，以及 Windows 专门定义的 Write Restricted Code SID `S-1-5-33`。`BaseNamedObjects` 等每次登录资源使用 logon-session SID，部分系统初始化和 IPC 对象则会向 `S-1-5-33` 授权；两者共同保证 write-restricted 进程可以完成启动。普通文件目录不会因为 token 包含这些 SID 而自动获得授权，仍然必须存在匹配的 ACE，并且账户 SID 的第一次访问检查也必须通过。
+token 的 restricting SID 列表包含每次执行生成的 capability SID、Everyone SID `S-1-1-0`、当前 logon-session SID，以及 Windows 专门定义的 Write Restricted Code SID `S-1-5-33`。`BaseNamedObjects` 等每次登录资源使用 logon-session SID，部分系统初始化和 IPC 对象会向 `S-1-5-33` 授权，而 CLR、Windows PowerShell 等通用 Win32 工具还会访问只向 Everyone 授权的共享系统对象。缺少 Everyone 会让 PowerShell 在命令代码执行前以 `Starting the CLR failed with HRESULT 80070005` 退出。
+
+这些兼容 SID 仍然需要账户 SID 的第一次访问检查和对象 DACL 中的匹配 ACE；但 Everyone 是一个明确的兼容性取舍：宿主上本来就向 Everyone 开放写权限的位置仍可写。生产宿主不得把安全敏感目录配置成 world-writable，精确的 workspace 写边界仍由随机 capability SID 及 protected-path deny ACE 提供。
 
 创建 restricted token 后，SDK 还会把这些 restricting SID 合并进 token default DACL。否则目标进程按默认安全描述符创建自己的内核对象后，可能在第二次访问检查中无法重新打开或写入它们，最终在进入命令代码前以 `STATUS_DLL_INIT_FAILED (0xC0000142)` 退出。
 

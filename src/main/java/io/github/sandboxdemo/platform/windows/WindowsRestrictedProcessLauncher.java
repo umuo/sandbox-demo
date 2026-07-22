@@ -41,6 +41,7 @@ final class WindowsRestrictedProcessLauncher {
 
     private static final int DISABLE_MAX_PRIVILEGE = 0x00000001;
     private static final int WRITE_RESTRICTED = 0x00000008;
+    private static final String WORLD_SID = "S-1-1-0";
     private static final String WRITE_RESTRICTED_CODE_SID = "S-1-5-33";
     private static final int TOKEN_GROUPS = 2;
     private static final int TOKEN_DEFAULT_DACL = 6;
@@ -338,6 +339,11 @@ final class WindowsRestrictedProcessLauncher {
         // BaseNamedObjects and other per-logon resources grant the logon SID rather than the user
         // or a synthetic file capability SID.
         result.add(logonSid);
+        // CLR, PowerShell and other general Win32 toolchains use shared system objects whose
+        // DACLs grant Everyone rather than the per-logon or Write Restricted Code SID. With a
+        // write-restricted token this SID participates only in the second check for write access;
+        // the dedicated account must still pass the normal DACL check.
+        result.add(WORLD_SID);
         // Windows grants selected initialization and IPC objects to this well-known SID. It lets a
         // write-restricted process initialize without granting the SID on ordinary filesystem
         // locations; writable roots continue to receive only per-execution capability ACEs.

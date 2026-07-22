@@ -29,12 +29,12 @@ class WindowsNativeStructureTest {
     }
 
     @Test
-    void restrictedTokenIncludesCapabilityAndWindowsWriteRestrictedSid() {
+    void restrictedTokenIncludesCapabilityAndWindowsCompatibilitySids() {
         String capability = "S-1-5-21-1-2-3-4";
         String logonSid = "S-1-5-5-123-456";
 
         assertEquals(
-                Arrays.asList(capability, logonSid, "S-1-5-33"),
+                Arrays.asList(capability, logonSid, "S-1-1-0", "S-1-5-33"),
                 WindowsRestrictedProcessLauncher.restrictionSids(
                         java.util.Collections.singletonList(capability), logonSid));
     }
