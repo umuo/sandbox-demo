@@ -30,18 +30,19 @@ public final class WindowsSandboxWorker {
                                 + " but was "
                                 + actualSid);
             }
-            try (WindowsPathLease ignored =
-                    WindowsPathLease.acquire(request.policy(), request.executable())) {
-                SandboxResult result =
-                        WindowsRestrictedProcessLauncher.execute(
-                                request.executable(),
-                                request.arguments(),
-                                request.standardInput(),
-                                request.policy(),
-                                request.environment(),
-                                request.capabilitySids());
-                WindowsWorkerProtocol.writeResult(resultFile, result, null);
-            }
+            // The trusted host validates these paths and keeps its WindowsPathLease open until
+            // this worker exits. Repeating that traversal here is both redundant and incorrect:
+            // the dedicated account intentionally cannot inspect owner-private ancestors such as
+            // C:\Users\<host>\AppData, even when an explicitly granted child is usable.
+            SandboxResult result =
+                    WindowsRestrictedProcessLauncher.execute(
+                            request.executable(),
+                            request.arguments(),
+                            request.standardInput(),
+                            request.policy(),
+                            request.environment(),
+                            request.capabilitySids());
+            WindowsWorkerProtocol.writeResult(resultFile, result, null);
         } catch (Throwable error) {
             try {
                 WindowsWorkerProtocol.writeResult(

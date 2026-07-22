@@ -23,8 +23,8 @@ class WindowsRestrictedTokenSandboxRunnerTest {
 
     @Test
     void permitsWorkspaceWriteAndBlocksSiblingWrite() throws Exception {
-        Path workspace = Files.createDirectory(root.resolve("workspace"));
-        Path outside = Files.createDirectory(root.resolve("outside"));
+        Path workspace = Files.createDirectory(root.resolve("workspace with spaces"));
+        Path outside = Files.createDirectory(root.resolve("outside with spaces"));
         SandboxPolicy policy =
                 SandboxPolicy.builder(workspace)
                         .network(NetworkPolicy.ALLOW)
@@ -34,7 +34,7 @@ class WindowsRestrictedTokenSandboxRunnerTest {
 
         Path allowed = workspace.resolve("allowed.txt");
         SandboxResult allowedResult = runner.execute(SandboxRequest.of(policy, cmdWrite(allowed)));
-        assertTrue(allowedResult.successful(), allowedResult.stderrUtf8());
+        assertTrue(allowedResult.successful(), failureDetails(allowedResult));
         assertTrue(Files.exists(allowed));
 
         Path blocked = outside.resolve("blocked.txt");
@@ -51,5 +51,14 @@ class WindowsRestrictedTokenSandboxRunnerTest {
                 "/s",
                 "/c",
                 "echo test>\"" + target + "\"");
+    }
+
+    private static String failureDetails(SandboxResult result) {
+        return "exitCode="
+                + result.exitCode()
+                + ", timedOut="
+                + result.timedOut()
+                + ", stderr="
+                + result.stderrUtf8();
     }
 }
