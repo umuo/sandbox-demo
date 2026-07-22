@@ -100,12 +100,14 @@ final class WindowsRestrictedProcessLauncher {
 
         try {
             baseToken = openCurrentToken();
-            for (String sid : restrictionSids(capabilitySids, currentLogonSid(baseToken))) {
+            String userSid = currentUserSid();
+            for (String sid :
+                    restrictionSids(capabilitySids, userSid, currentLogonSid(baseToken))) {
                 convertedSids.add(convertSid(sid));
             }
             restrictedToken = createRestrictedToken(baseToken, convertedSids);
             addSidsToDefaultDacl(restrictedToken, convertedSids);
-            desktop = WindowsPrivateDesktop.create(currentUserSid(), capabilitySids);
+            desktop = WindowsPrivateDesktop.create(userSid, capabilitySids);
 
             WindowsNative.SECURITY_ATTRIBUTES inheritable = inheritableAttributes();
             Pointer[] stdout = createPipe(inheritable);
@@ -334,8 +336,12 @@ final class WindowsRestrictedProcessLauncher {
         return restricted.getValue();
     }
 
-    static List<String> restrictionSids(List<String> capabilitySids, String logonSid) {
+    static List<String> restrictionSids(
+            List<String> capabilitySids, String userSid, String logonSid) {
         List<String> result = new ArrayList<>(capabilitySids);
+        // User-profile registry and cryptographic objects grant the dedicated account SID. This
+        // does not expose the host user's profile because the target runs as a separate account.
+        result.add(userSid);
         // BaseNamedObjects and other per-logon resources grant the logon SID rather than the user
         // or a synthetic file capability SID.
         result.add(logonSid);

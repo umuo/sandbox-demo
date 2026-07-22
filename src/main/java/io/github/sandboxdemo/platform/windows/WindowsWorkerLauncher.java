@@ -19,6 +19,7 @@ import java.util.Map;
 /** Starts the trusted Java worker under a dedicated Windows local account. */
 final class WindowsWorkerLauncher {
 
+    private static final int LOGON_WITH_PROFILE = 0x00000001;
     private static final int CREATE_SUSPENDED = 0x00000004;
     private static final int CREATE_UNICODE_ENVIRONMENT = 0x00000400;
     private static final int CREATE_NO_WINDOW = 0x08000000;
@@ -60,7 +61,7 @@ final class WindowsWorkerLauncher {
                             new WString(credential.username()),
                             new WString("."),
                             new WString(credential.password()),
-                            0,
+                            LOGON_WITH_PROFILE,
                             new WString(runtime.javaExecutable().toString()),
                             commandLineMemory,
                             CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW,
