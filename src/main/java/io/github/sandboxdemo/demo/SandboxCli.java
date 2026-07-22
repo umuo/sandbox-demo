@@ -27,7 +27,11 @@ public final class SandboxCli {
         try {
             int exitCode;
             if (args.length == 0 || "demo".equals(args[0])) {
-                exitCode = runDemo(args.length > 1 ? Path.of(args[1]) : Path.of(".sandbox-demo"));
+                exitCode =
+                        runDemo(
+                                args.length > 1
+                                        ? java.nio.file.Paths.get(args[1])
+                                        : java.nio.file.Paths.get(".sandbox-demo"));
             } else if ("status".equals(args[0])) {
                 SandboxRuntimeStatus status =
                         SandboxClient.builder()
@@ -86,24 +90,41 @@ public final class SandboxCli {
                 break;
             }
             switch (args[i]) {
-                case "--cwd" -> cwd = Path.of(requireValue(args, ++i, "--cwd"));
-                case "--readable" -> readable.add(Path.of(requireValue(args, ++i, "--readable")));
-                case "--writable" -> writable.add(Path.of(requireValue(args, ++i, "--writable")));
-                case "--protect" ->
-                        protectedPaths.add(Path.of(requireValue(args, ++i, "--protect")));
-                case "--network" -> network = parseNetwork(requireValue(args, ++i, "--network"));
-                case "--read-policy" ->
-                        readPolicy = parseReadPolicy(requireValue(args, ++i, "--read-policy"));
-                case "--timeout" ->
-                        timeout =
-                                Duration.ofMillis(
-                                        Long.parseLong(requireValue(args, ++i, "--timeout")));
-                case "--max-output-bytes" ->
-                        maxOutputBytes =
-                                Integer.parseInt(requireValue(args, ++i, "--max-output-bytes"));
-                case "--allow-path-search" -> allowPathSearch = true;
-                case "--env" -> addEnvironment(environment, requireValue(args, ++i, "--env"));
-                default -> throw new IllegalArgumentException("unknown option: " + args[i]);
+                case "--cwd":
+                    cwd = java.nio.file.Paths.get(requireValue(args, ++i, "--cwd"));
+                    break;
+                case "--readable":
+                    readable.add(java.nio.file.Paths.get(requireValue(args, ++i, "--readable")));
+                    break;
+                case "--writable":
+                    writable.add(java.nio.file.Paths.get(requireValue(args, ++i, "--writable")));
+                    break;
+                case "--protect":
+                    protectedPaths.add(
+                            java.nio.file.Paths.get(requireValue(args, ++i, "--protect")));
+                    break;
+                case "--network":
+                    network = parseNetwork(requireValue(args, ++i, "--network"));
+                    break;
+                case "--read-policy":
+                    readPolicy = parseReadPolicy(requireValue(args, ++i, "--read-policy"));
+                    break;
+                case "--timeout":
+                    timeout =
+                            Duration.ofMillis(Long.parseLong(requireValue(args, ++i, "--timeout")));
+                    break;
+                case "--max-output-bytes":
+                    maxOutputBytes =
+                            Integer.parseInt(requireValue(args, ++i, "--max-output-bytes"));
+                    break;
+                case "--allow-path-search":
+                    allowPathSearch = true;
+                    break;
+                case "--env":
+                    addEnvironment(environment, requireValue(args, ++i, "--env"));
+                    break;
+                default:
+                    throw new IllegalArgumentException("unknown option: " + args[i]);
             }
         }
 
@@ -124,7 +145,9 @@ public final class SandboxCli {
 
         CommandSpec command =
                 new CommandSpec(
-                        args[separator + 1], List.of(args).subList(separator + 2, args.length));
+                        args[separator + 1],
+                        io.github.sandboxdemo.core.Java8.listOf(args)
+                                .subList(separator + 2, args.length));
         SandboxClient runner = SandboxClient.create();
         SandboxResult result =
                 runner.execute(new SandboxRequest(policy.build(), command, environment));
@@ -149,7 +172,8 @@ public final class SandboxCli {
         Files.deleteIfExists(allowedFile);
         Files.deleteIfExists(blockedFile);
         Files.deleteIfExists(protectedFile);
-        Files.writeString(outsideSecret, "host-secret-must-not-be-readable");
+        io.github.sandboxdemo.core.Java8.writeString(
+                outsideSecret, "host-secret-must-not-be-readable");
 
         NetworkPolicy network = NetworkPolicy.DENY;
         ReadPolicy readPolicy =
@@ -210,7 +234,7 @@ public final class SandboxCli {
         if (OperatingSystem.current() == OperatingSystem.WINDOWS) {
             String systemRoot = System.getenv().getOrDefault("SystemRoot", "C:\\Windows");
             return CommandSpec.of(
-                    Path.of(systemRoot, "System32", "cmd.exe").toString(),
+                    java.nio.file.Paths.get(systemRoot, "System32", "cmd.exe").toString(),
                     "/d",
                     "/s",
                     "/c",
@@ -224,7 +248,7 @@ public final class SandboxCli {
             String systemRoot = System.getenv().getOrDefault("SystemRoot", "C:\\Windows");
             String command = "echo " + content + ">\"" + target + "\"";
             return CommandSpec.of(
-                    Path.of(systemRoot, "System32", "cmd.exe").toString(),
+                    java.nio.file.Paths.get(systemRoot, "System32", "cmd.exe").toString(),
                     "/d",
                     "/s",
                     "/c",
@@ -242,7 +266,7 @@ public final class SandboxCli {
     private static void printCheck(String name, boolean success, SandboxResult result) {
         System.out.printf(
                 "%-25s : %s (exit=%d)%n", name, success ? "PASS" : "FAIL", result.exitCode());
-        if (!result.stderrUtf8().isBlank()) {
+        if (!io.github.sandboxdemo.core.Java8.isBlank(result.stderrUtf8())) {
             System.out.println("  stderr: " + result.stderrUtf8().trim());
         }
     }
@@ -255,20 +279,25 @@ public final class SandboxCli {
     }
 
     private static NetworkPolicy parseNetwork(String value) {
-        return switch (value.toLowerCase()) {
-            case "allow" -> NetworkPolicy.ALLOW;
-            case "deny" -> NetworkPolicy.DENY;
-            default -> throw new IllegalArgumentException("network must be allow or deny");
-        };
+        String normalized = value.toLowerCase();
+        if ("allow".equals(normalized)) {
+            return NetworkPolicy.ALLOW;
+        }
+        if ("deny".equals(normalized)) {
+            return NetworkPolicy.DENY;
+        }
+        throw new IllegalArgumentException("network must be allow or deny");
     }
 
     private static ReadPolicy parseReadPolicy(String value) {
-        return switch (value.toLowerCase()) {
-            case "declared", "declared-only" -> ReadPolicy.DECLARED_ONLY;
-            case "host" -> ReadPolicy.HOST;
-            default ->
-                    throw new IllegalArgumentException("read-policy must be declared-only or host");
-        };
+        String normalized = value.toLowerCase();
+        if ("declared".equals(normalized) || "declared-only".equals(normalized)) {
+            return ReadPolicy.DECLARED_ONLY;
+        }
+        if ("host".equals(normalized)) {
+            return ReadPolicy.HOST;
+        }
+        throw new IllegalArgumentException("read-policy must be declared-only or host");
     }
 
     private static void addEnvironment(Map<String, String> environment, String assignment) {
@@ -284,31 +313,30 @@ public final class SandboxCli {
             return SandboxRuntime.defaultWindowsHome();
         }
         if (args.length == 3 && "--home".equals(args[1])) {
-            return Path.of(args[2]);
+            return java.nio.file.Paths.get(args[2]);
         }
         throw new IllegalArgumentException(args[0] + " accepts only optional --home PATH");
     }
 
     private static void printUsage() {
         System.err.println(
-                """
-                Usage:
-                  java -jar sandbox.jar demo [demo-directory]
-                  java -jar sandbox.jar status [--home PATH]
-                  java -jar sandbox.jar setup-windows [--home PATH]
-                  java -jar sandbox.jar uninstall-windows [--home PATH]
-                  java -jar sandbox.jar run --cwd PATH [options] -- EXECUTABLE [ARG...]
-
-                Options:
-                  --writable PATH     add a writable root (repeatable)
-                  --readable PATH     add a read-only root (repeatable)
-                  --protect PATH      make a nested path read-only (repeatable)
-                  --read-policy declared-only|host
-                  --network allow|deny
-                  --timeout MILLIS
-                  --max-output-bytes BYTES
-                  --allow-path-search explicitly permit resolving outer argv[0] through PATH
-                  --env KEY=VALUE     explicitly pass an environment variable
-                """);
+                io.github.sandboxdemo.core.Java8.lines(
+                        "Usage:",
+                        "  java -jar sandbox.jar demo [demo-directory]",
+                        "  java -jar sandbox.jar status [--home PATH]",
+                        "  java -jar sandbox.jar setup-windows [--home PATH]",
+                        "  java -jar sandbox.jar uninstall-windows [--home PATH]",
+                        "  java -jar sandbox.jar run --cwd PATH [options] -- EXECUTABLE [ARG...]",
+                        "",
+                        "Options:",
+                        "  --writable PATH     add a writable root (repeatable)",
+                        "  --readable PATH     add a read-only root (repeatable)",
+                        "  --protect PATH      make a nested path read-only (repeatable)",
+                        "  --read-policy declared-only|host",
+                        "  --network allow|deny",
+                        "  --timeout MILLIS",
+                        "  --max-output-bytes BYTES",
+                        "  --allow-path-search explicitly permit resolving outer argv[0] through PATH",
+                        "  --env KEY=VALUE     explicitly pass an environment variable"));
     }
 }

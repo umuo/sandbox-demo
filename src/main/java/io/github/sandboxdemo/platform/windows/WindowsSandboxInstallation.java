@@ -37,10 +37,12 @@ final class WindowsSandboxInstallation {
 
     static Path defaultHome() {
         String localAppData = System.getenv("LOCALAPPDATA");
-        if (localAppData != null && !localAppData.isBlank()) {
-            return Path.of(localAppData, "AgentSandboxSdk").toAbsolutePath().normalize();
+        if (localAppData != null && !io.github.sandboxdemo.core.Java8.isBlank(localAppData)) {
+            return java.nio.file.Paths.get(localAppData, "AgentSandboxSdk")
+                    .toAbsolutePath()
+                    .normalize();
         }
-        return Path.of(System.getProperty("user.home"), ".agent-sandbox-sdk")
+        return java.nio.file.Paths.get(System.getProperty("user.home"), ".agent-sandbox-sdk")
                 .toAbsolutePath()
                 .normalize();
     }
@@ -74,7 +76,7 @@ final class WindowsSandboxInstallation {
         }
         return new WindowsSandboxInstallation(
                 home,
-                Path.of(required(values, "java.home")),
+                java.nio.file.Paths.get(required(values, "java.home")),
                 credential(values, "offline"),
                 credential(values, "online"));
     }
@@ -170,18 +172,34 @@ final class WindowsSandboxInstallation {
 
     private static String required(Properties values, String name) throws SandboxException {
         String value = values.getProperty(name);
-        if (value == null || value.isBlank()) {
+        if (value == null || io.github.sandboxdemo.core.Java8.isBlank(value)) {
             throw new SandboxException("missing Windows sandbox installation value: " + name);
         }
         return value;
     }
 
-    record Credential(String username, String sid, String password) {
+    static final class Credential {
 
-        Credential {
-            Objects.requireNonNull(username, "username");
-            Objects.requireNonNull(sid, "sid");
-            Objects.requireNonNull(password, "password");
+        private final String username;
+        private final String sid;
+        private final String password;
+
+        Credential(String username, String sid, String password) {
+            this.username = Objects.requireNonNull(username, "username");
+            this.sid = Objects.requireNonNull(sid, "sid");
+            this.password = Objects.requireNonNull(password, "password");
+        }
+
+        String username() {
+            return username;
+        }
+
+        String sid() {
+            return sid;
+        }
+
+        String password() {
+            return password;
         }
 
         @Override

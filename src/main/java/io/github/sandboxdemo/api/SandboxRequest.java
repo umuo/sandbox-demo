@@ -3,6 +3,8 @@ package io.github.sandboxdemo.api;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -11,33 +13,49 @@ import java.util.Set;
 import java.util.TreeSet;
 
 /** One command execution request and its explicitly supplied environment. */
-public record SandboxRequest(
-        SandboxPolicy policy,
-        CommandSpec command,
-        Map<String, String> environment,
-        byte[] standardInput) {
+public final class SandboxRequest {
 
     private static final int MAX_ENVIRONMENT_ENTRIES = 512;
     private static final int MAX_ENVIRONMENT_CHARACTERS = 30_000;
     private static final int MAX_STANDARD_INPUT_BYTES = 8 * 1024 * 1024;
     private static final Set<String> RESERVED_VARIABLES =
-            Set.of("TEMP", "TMP", "TMPDIR", "HOME", "USERPROFILE", "XDG_CACHE_HOME");
+            Collections.unmodifiableSet(
+                    new java.util.HashSet<>(
+                            Arrays.asList(
+                                    "TEMP",
+                                    "TMP",
+                                    "TMPDIR",
+                                    "HOME",
+                                    "USERPROFILE",
+                                    "XDG_CACHE_HOME")));
 
-    public SandboxRequest {
-        policy = Objects.requireNonNull(policy, "policy");
-        command = Objects.requireNonNull(command, "command");
-        environment =
-                Map.copyOf(new LinkedHashMap<>(Objects.requireNonNull(environment, "environment")));
-        standardInput =
-                java.util.Arrays.copyOf(
+    private final SandboxPolicy policy;
+    private final CommandSpec command;
+    private final Map<String, String> environment;
+    private final byte[] standardInput;
+
+    public SandboxRequest(
+            SandboxPolicy policy,
+            CommandSpec command,
+            Map<String, String> environment,
+            byte[] standardInput) {
+        this.policy = Objects.requireNonNull(policy, "policy");
+        this.command = Objects.requireNonNull(command, "command");
+        Map<String, String> copiedEnvironment =
+                Collections.unmodifiableMap(
+                        new LinkedHashMap<>(Objects.requireNonNull(environment, "environment")));
+        byte[] copiedStandardInput =
+                Arrays.copyOf(
                         Objects.requireNonNull(standardInput, "standardInput"),
                         standardInput.length);
-        environment.forEach(SandboxRequest::validateEnvironmentEntry);
-        validateEnvironment(environment);
-        if (standardInput.length > MAX_STANDARD_INPUT_BYTES) {
+        copiedEnvironment.forEach(SandboxRequest::validateEnvironmentEntry);
+        validateEnvironment(copiedEnvironment);
+        if (copiedStandardInput.length > MAX_STANDARD_INPUT_BYTES) {
             throw new IllegalArgumentException(
                     "standardInput exceeds limit " + MAX_STANDARD_INPUT_BYTES);
         }
+        this.environment = copiedEnvironment;
+        this.standardInput = copiedStandardInput;
     }
 
     public SandboxRequest(
@@ -46,17 +64,28 @@ public record SandboxRequest(
     }
 
     public static SandboxRequest of(SandboxPolicy policy, CommandSpec command) {
-        return new SandboxRequest(policy, command, Map.of(), new byte[0]);
+        return new SandboxRequest(policy, command, Collections.emptyMap(), new byte[0]);
     }
 
-    @Override
+    public SandboxPolicy policy() {
+        return policy;
+    }
+
+    public CommandSpec command() {
+        return command;
+    }
+
+    public Map<String, String> environment() {
+        return environment;
+    }
+
     public byte[] standardInput() {
-        return java.util.Arrays.copyOf(standardInput, standardInput.length);
+        return Arrays.copyOf(standardInput, standardInput.length);
     }
 
     /** Starts an Agent-friendly builder without inserting a shell implicitly. */
     public static Builder builder(Path workingDirectory, String executable) {
-        return new Builder(workingDirectory, new CommandSpec(executable, List.of()));
+        return new Builder(workingDirectory, new CommandSpec(executable, Collections.emptyList()));
     }
 
     /** Starts an Agent-friendly builder from an existing command specification. */
@@ -65,7 +94,10 @@ public record SandboxRequest(
     }
 
     private static void validateEnvironmentEntry(String name, String value) {
-        if (name == null || name.isBlank() || name.indexOf('=') >= 0 || name.indexOf('\0') >= 0) {
+        if (name == null
+                || io.github.sandboxdemo.core.Java8.isBlank(name)
+                || name.indexOf('=') >= 0
+                || name.indexOf('\0') >= 0) {
             throw new IllegalArgumentException("invalid environment variable name: " + name);
         }
         if (value == null || value.indexOf('\0') >= 0) {
@@ -117,7 +149,7 @@ public record SandboxRequest(
         }
 
         public Builder arguments(String... arguments) {
-            return arguments(List.of(arguments));
+            return arguments(Arrays.asList(arguments));
         }
 
         public Builder arguments(List<String> arguments) {
@@ -205,5 +237,39 @@ public record SandboxRequest(
                     environment,
                     standardInput);
         }
+    }
+
+    @Override
+    public boolean equals(Object other) {
+        if (this == other) {
+            return true;
+        }
+        if (!(other instanceof SandboxRequest)) {
+            return false;
+        }
+        SandboxRequest that = (SandboxRequest) other;
+        return policy.equals(that.policy)
+                && command.equals(that.command)
+                && environment.equals(that.environment)
+                && Arrays.equals(standardInput, that.standardInput);
+    }
+
+    @Override
+    public int hashCode() {
+        int result = Objects.hash(policy, command, environment);
+        return 31 * result + Arrays.hashCode(standardInput);
+    }
+
+    @Override
+    public String toString() {
+        return "SandboxRequest[policy="
+                + policy
+                + ", command="
+                + command
+                + ", environment="
+                + environment
+                + ", standardInput="
+                + Arrays.toString(standardInput)
+                + "]";
     }
 }

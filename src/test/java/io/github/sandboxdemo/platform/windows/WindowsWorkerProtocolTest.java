@@ -15,8 +15,6 @@ import io.github.sandboxdemo.core.ValidatedPolicy;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
-import java.util.List;
-import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -43,11 +41,11 @@ class WindowsWorkerProtocolTest {
                     new WindowsWorkerProtocol.WorkerRequest(
                             "S-1-5-21-1",
                             executable,
-                            List.of("one", "two"),
+                            io.github.sandboxdemo.core.Java8.listOf("one", "two"),
                             "stdin-data".getBytes(java.nio.charset.StandardCharsets.UTF_8),
                             policy,
-                            Map.of("LANG", "C"),
-                            List.of("S-1-5-21-2"));
+                            io.github.sandboxdemo.core.Java8.mapOf("LANG", "C"),
+                            io.github.sandboxdemo.core.Java8.listOf("S-1-5-21-2"));
             WindowsWorkerProtocol.writeRequest(requestFile, request);
             WindowsWorkerProtocol.WorkerRequest decoded =
                     WindowsWorkerProtocol.readRequest(requestFile);

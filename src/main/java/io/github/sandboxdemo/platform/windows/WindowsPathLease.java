@@ -46,7 +46,10 @@ final class WindowsPathLease implements AutoCloseable {
 
         List<Pointer> handles = new ArrayList<>();
         try {
-            for (Path path : protectedObjects.stream().distinct().toList()) {
+            for (Path path :
+                    protectedObjects.stream()
+                            .distinct()
+                            .collect(java.util.stream.Collectors.toList())) {
                 rejectRemoteOrNonNtfs(path);
                 rejectReparseComponents(path);
                 handles.add(openWithoutDeleteSharing(path));

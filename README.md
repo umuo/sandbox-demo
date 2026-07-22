@@ -1,6 +1,6 @@
 # Agent Sandbox Java SDK
 
-这是一个 Maven 管理的 Java 17 SDK，用操作系统机制限制 Agent 启动的任意进程树。Agent 通过 `SandboxClient` Facade 调用，不需要接触 JNA、ACL、namespace 或 Seatbelt。它不解析 Bash、CMD、PowerShell、Python 或 Node 命令来判断“是否安全”。
+这是一个 Maven 管理的 Java 8 SDK，用操作系统机制限制 Agent 启动的任意进程树。Agent 通过 `SandboxClient` Facade 调用，不需要接触 JNA、ACL、namespace 或 Seatbelt。它不解析 Bash、CMD、PowerShell、Python 或 Node 命令来判断“是否安全”。
 
 当前默认后端：
 
@@ -107,7 +107,7 @@ SANDBOX_RUN_PLATFORM_INTEGRATION=1 mvn test
 
 ## Windows 安装与升级
 
-要求 Windows 10/11、NTFS、64 位 JDK 17+。首次安装必须从管理员终端运行打包后的 fat JAR：
+要求 Windows 10/11、NTFS、64 位 JDK 8+。首次安装必须从管理员终端运行打包后的 fat JAR：
 
 ```powershell
 java -jar target\agent-sandbox-sdk-1.0.0-SNAPSHOT-all.jar setup-windows

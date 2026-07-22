@@ -9,7 +9,7 @@ import java.util.Map;
 public final class EnvironmentPolicy {
 
     private static final List<String> ALLOWED_HOST_VARIABLES =
-            List.of(
+            io.github.sandboxdemo.core.Java8.listOf(
                     "PATH",
                     "PATHEXT",
                     "SystemRoot",
@@ -46,6 +46,6 @@ public final class EnvironmentPolicy {
                             result.keySet().removeIf(existing -> existing.equalsIgnoreCase(name));
                             result.put(name, value);
                         });
-        return Map.copyOf(result);
+        return io.github.sandboxdemo.core.Java8.copyMap(result);
     }
 }

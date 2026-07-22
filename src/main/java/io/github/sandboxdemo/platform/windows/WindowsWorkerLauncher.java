@@ -38,7 +38,7 @@ final class WindowsWorkerLauncher {
             throws SandboxException, InterruptedException {
 
         List<String> workerArguments =
-                List.of(
+                io.github.sandboxdemo.core.Java8.listOf(
                         "-cp",
                         runtime.classPathArgument(),
                         WindowsSandboxWorker.class.getName(),
@@ -133,7 +133,7 @@ final class WindowsWorkerLauncher {
 
     private static void copy(Map<String, String> target, String name) {
         String value = System.getenv(name);
-        if (value != null && !value.isBlank()) {
+        if (value != null && !io.github.sandboxdemo.core.Java8.isBlank(value)) {
             target.put(name, value);
         }
     }

@@ -28,14 +28,16 @@ final class WindowsCommandLine {
             if (current == '\\') {
                 backslashes++;
             } else if (current == '"') {
-                result.append("\\".repeat(backslashes * 2 + 1)).append('"');
+                result.append(io.github.sandboxdemo.core.Java8.repeat("\\", backslashes * 2 + 1))
+                        .append('"');
                 backslashes = 0;
             } else {
-                result.append("\\".repeat(backslashes)).append(current);
+                result.append(io.github.sandboxdemo.core.Java8.repeat("\\", backslashes))
+                        .append(current);
                 backslashes = 0;
             }
         }
-        result.append("\\".repeat(backslashes * 2)).append('"');
+        result.append(io.github.sandboxdemo.core.Java8.repeat("\\", backslashes * 2)).append('"');
         return result.toString();
     }
 }

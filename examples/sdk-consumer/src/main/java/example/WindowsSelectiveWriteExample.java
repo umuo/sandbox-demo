@@ -29,7 +29,7 @@ public final class WindowsSelectiveWriteExample {
                     "usage: WindowsSelectiveWriteExample [project-directory]");
         }
 
-        Path project = (args.length == 0 ? Path.of(".") : Path.of(args[0])).toRealPath();
+        Path project = (args.length == 0 ? java.nio.file.Paths.get(".") : java.nio.file.Paths.get(args[0])).toRealPath();
         String demonstration = demonstrationCommand(project);
         SandboxResult result =
                 new WindowsSelectiveWriteExample().execute(project, demonstration);
@@ -52,7 +52,7 @@ public final class WindowsSelectiveWriteExample {
         Path appData = resolveAppData();
         String systemRoot = System.getenv().getOrDefault("SystemRoot", "C:\\Windows");
         String powershell =
-                Path.of(
+                java.nio.file.Paths.get(
                                 systemRoot,
                                 "System32",
                                 "WindowsPowerShell",
@@ -85,10 +85,10 @@ public final class WindowsSelectiveWriteExample {
 
     private static Path resolveAppData() throws IOException {
         String userProfile = System.getenv("USERPROFILE");
-        if (userProfile == null || userProfile.isBlank()) {
+        if (userProfile == null || io.github.sandboxdemo.core.Java8.isBlank(userProfile)) {
             throw new IllegalStateException("USERPROFILE is unavailable");
         }
-        Path appData = Path.of(userProfile, "AppData");
+        Path appData = java.nio.file.Paths.get(userProfile, "AppData");
         if (!Files.isDirectory(appData)) {
             throw new IllegalStateException("AppData directory is unavailable: " + appData);
         }

@@ -22,7 +22,7 @@ public final class ExecutableResolver {
             boolean allowPathSearch)
             throws SandboxException {
 
-        Path requested = Path.of(executable);
+        Path requested = java.nio.file.Paths.get(executable);
         if (requested.isAbsolute()) {
             return requireExecutable(requested);
         }
@@ -38,16 +38,16 @@ public final class ExecutableResolver {
         }
 
         String pathValue = environment.getOrDefault("PATH", System.getenv("PATH"));
-        if (pathValue == null || pathValue.isBlank()) {
+        if (pathValue == null || io.github.sandboxdemo.core.Java8.isBlank(pathValue)) {
             throw new SandboxException("PATH is empty; cannot resolve executable: " + executable);
         }
 
         List<String> names = candidateNames(executable, environment);
         for (String entry : pathValue.split(java.util.regex.Pattern.quote(File.pathSeparator))) {
-            if (entry.isBlank()) {
+            if (io.github.sandboxdemo.core.Java8.isBlank(entry)) {
                 continue;
             }
-            Path directory = Path.of(entry).toAbsolutePath().normalize();
+            Path directory = java.nio.file.Paths.get(entry).toAbsolutePath().normalize();
             if (directory.equals(workingDirectory)) {
                 continue;
             }
@@ -64,13 +64,13 @@ public final class ExecutableResolver {
 
     private static List<String> candidateNames(String executable, Map<String, String> environment) {
         if (OperatingSystem.current() != OperatingSystem.WINDOWS || executable.contains(".")) {
-            return List.of(executable);
+            return io.github.sandboxdemo.core.Java8.listOf(executable);
         }
         String pathExt = environment.getOrDefault("PATHEXT", ".COM;.EXE;.BAT;.CMD");
         List<String> result = new ArrayList<>();
         result.add(executable);
         for (String extension : pathExt.split(";")) {
-            if (!extension.isBlank()) {
+            if (!io.github.sandboxdemo.core.Java8.isBlank(extension)) {
                 result.add(executable + extension.toLowerCase(Locale.ROOT));
                 result.add(executable + extension.toUpperCase(Locale.ROOT));
             }

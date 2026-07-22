@@ -24,24 +24,24 @@ import java.util.concurrent.TimeUnit;
 public final class LinuxBubblewrapSandboxRunner implements SandboxRunner {
 
     private static final List<Path> RUNTIME_ROOTS =
-            List.of(
-                    Path.of("/usr"),
-                    Path.of("/bin"),
-                    Path.of("/sbin"),
-                    Path.of("/lib"),
-                    Path.of("/lib64"),
-                    Path.of("/etc/ld.so.cache"),
-                    Path.of("/etc/ld.so.conf"),
-                    Path.of("/etc/ld.so.conf.d"),
-                    Path.of("/etc/nsswitch.conf"),
-                    Path.of("/etc/passwd"),
-                    Path.of("/etc/group"),
-                    Path.of("/etc/hosts"),
-                    Path.of("/etc/resolv.conf"),
-                    Path.of("/etc/localtime"),
-                    Path.of("/etc/ssl/certs"),
-                    Path.of("/etc/pki"),
-                    Path.of("/etc/ca-certificates"));
+            io.github.sandboxdemo.core.Java8.listOf(
+                    java.nio.file.Paths.get("/usr"),
+                    java.nio.file.Paths.get("/bin"),
+                    java.nio.file.Paths.get("/sbin"),
+                    java.nio.file.Paths.get("/lib"),
+                    java.nio.file.Paths.get("/lib64"),
+                    java.nio.file.Paths.get("/etc/ld.so.cache"),
+                    java.nio.file.Paths.get("/etc/ld.so.conf"),
+                    java.nio.file.Paths.get("/etc/ld.so.conf.d"),
+                    java.nio.file.Paths.get("/etc/nsswitch.conf"),
+                    java.nio.file.Paths.get("/etc/passwd"),
+                    java.nio.file.Paths.get("/etc/group"),
+                    java.nio.file.Paths.get("/etc/hosts"),
+                    java.nio.file.Paths.get("/etc/resolv.conf"),
+                    java.nio.file.Paths.get("/etc/localtime"),
+                    java.nio.file.Paths.get("/etc/ssl/certs"),
+                    java.nio.file.Paths.get("/etc/pki"),
+                    java.nio.file.Paths.get("/etc/ca-certificates"));
 
     @Override
     public String backendName() {
@@ -52,7 +52,7 @@ public final class LinuxBubblewrapSandboxRunner implements SandboxRunner {
     public static String probeBackend() throws SandboxException, InterruptedException {
         Path bwrap = findBubblewrap();
         List<String> command =
-                List.of(
+                io.github.sandboxdemo.core.Java8.listOf(
                         bwrap.toString(),
                         "--cap-drop",
                         "ALL",
@@ -87,7 +87,10 @@ public final class LinuxBubblewrapSandboxRunner implements SandboxRunner {
         }
         String output;
         try {
-            output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            output =
+                    new String(
+                            io.github.sandboxdemo.core.Java8.readAllBytes(process.getInputStream()),
+                            StandardCharsets.UTF_8);
         } catch (IOException e) {
             throw new SandboxException("failed to read bubblewrap readiness output", e);
         }
@@ -135,7 +138,7 @@ public final class LinuxBubblewrapSandboxRunner implements SandboxRunner {
             // host-kernel/AppArmor failure while bubblewrap configures the new loopback device.
 
             if (policy.readPolicy() == ReadPolicy.HOST) {
-                addPathPair(sandboxCommand, "--ro-bind", Path.of("/"));
+                addPathPair(sandboxCommand, "--ro-bind", java.nio.file.Paths.get("/"));
             } else {
                 // Without a root bind bubblewrap starts from an empty tmpfs. Only
                 // runtime and caller-declared roots become visible.
@@ -216,9 +219,12 @@ public final class LinuxBubblewrapSandboxRunner implements SandboxRunner {
     private static Path findBubblewrap() throws SandboxBackendUnavailableException {
         String override = System.getenv("SANDBOX_BWRAP");
         List<Path> candidates =
-                override == null || override.isBlank()
-                        ? List.of(Path.of("/usr/bin/bwrap"), Path.of("/bin/bwrap"))
-                        : List.of(Path.of(override));
+                override == null || io.github.sandboxdemo.core.Java8.isBlank(override)
+                        ? io.github.sandboxdemo.core.Java8.listOf(
+                                java.nio.file.Paths.get("/usr/bin/bwrap"),
+                                java.nio.file.Paths.get("/bin/bwrap"))
+                        : io.github.sandboxdemo.core.Java8.listOf(
+                                java.nio.file.Paths.get(override));
         for (Path candidate : candidates) {
             if (candidate.isAbsolute() && Files.isExecutable(candidate)) {
                 return candidate.toAbsolutePath().normalize();

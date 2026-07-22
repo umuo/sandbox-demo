@@ -53,7 +53,7 @@ final class LinuxSeccompFilter {
     }
 
     private static List<Instruction> denyAllNetwork(Architecture architecture) {
-        return List.of(
+        return io.github.sandboxdemo.core.Java8.listOf(
                 load(SECCOMP_DATA_ARCH_OFFSET),
                 jump(architecture.auditArchitecture(), 1, 0),
                 result(SECCOMP_RETURN_KILL_PROCESS),
@@ -68,7 +68,7 @@ final class LinuxSeccompFilter {
     }
 
     private static List<Instruction> denyHostUnixSockets(Architecture architecture) {
-        return List.of(
+        return io.github.sandboxdemo.core.Java8.listOf(
                 load(SECCOMP_DATA_ARCH_OFFSET),
                 jump(architecture.auditArchitecture(), 1, 0),
                 result(SECCOMP_RETURN_KILL_PROCESS),
@@ -97,7 +97,19 @@ final class LinuxSeccompFilter {
         return new Instruction(BPF_RETURN, 0, 0, value);
     }
 
-    private record Instruction(short code, int jumpTrue, int jumpFalse, int value) {
+    private static final class Instruction {
+
+        private final short code;
+        private final int jumpTrue;
+        private final int jumpFalse;
+        private final int value;
+
+        private Instruction(short code, int jumpTrue, int jumpFalse, int value) {
+            this.code = code;
+            this.jumpTrue = jumpTrue;
+            this.jumpFalse = jumpFalse;
+            this.value = value;
+        }
 
         void write(ByteBuffer output) {
             output.putShort(code);
@@ -107,25 +119,53 @@ final class LinuxSeccompFilter {
         }
     }
 
-    private record Architecture(
-            int auditArchitecture,
-            int socketSyscall,
-            int socketPairSyscall,
-            int ioUringSetupSyscall) {
+    private static final class Architecture {
 
         private static final int AUDIT_ARCH_X86_64 = 0xC000003E;
         private static final int AUDIT_ARCH_AARCH64 = 0xC00000B7;
 
+        private final int auditArchitecture;
+        private final int socketSyscall;
+        private final int socketPairSyscall;
+        private final int ioUringSetupSyscall;
+
+        private Architecture(
+                int auditArchitecture,
+                int socketSyscall,
+                int socketPairSyscall,
+                int ioUringSetupSyscall) {
+            this.auditArchitecture = auditArchitecture;
+            this.socketSyscall = socketSyscall;
+            this.socketPairSyscall = socketPairSyscall;
+            this.ioUringSetupSyscall = ioUringSetupSyscall;
+        }
+
+        int auditArchitecture() {
+            return auditArchitecture;
+        }
+
+        int socketSyscall() {
+            return socketSyscall;
+        }
+
+        int socketPairSyscall() {
+            return socketPairSyscall;
+        }
+
+        int ioUringSetupSyscall() {
+            return ioUringSetupSyscall;
+        }
+
         static Architecture current() throws SandboxBackendUnavailableException {
             String architecture = System.getProperty("os.arch", "").toLowerCase(Locale.ROOT);
-            return switch (architecture) {
-                case "amd64", "x86_64" -> new Architecture(AUDIT_ARCH_X86_64, 41, 53, 425);
-                case "aarch64", "arm64" -> new Architecture(AUDIT_ARCH_AARCH64, 198, 199, 425);
-                default ->
-                        throw new SandboxBackendUnavailableException(
-                                "the Linux seccomp policy supports x86_64 and aarch64 only: "
-                                        + architecture);
-            };
+            if ("amd64".equals(architecture) || "x86_64".equals(architecture)) {
+                return new Architecture(AUDIT_ARCH_X86_64, 41, 53, 425);
+            }
+            if ("aarch64".equals(architecture) || "arm64".equals(architecture)) {
+                return new Architecture(AUDIT_ARCH_AARCH64, 198, 199, 425);
+            }
+            throw new SandboxBackendUnavailableException(
+                    "the Linux seccomp policy supports x86_64 and aarch64 only: " + architecture);
         }
     }
 }

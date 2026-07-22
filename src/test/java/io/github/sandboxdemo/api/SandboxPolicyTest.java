@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.nio.file.Path;
-import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -15,8 +14,12 @@ class SandboxPolicyTest {
     @Test
     void workingDirectoryIsWritableByDefault() {
         SandboxPolicy policy = SandboxPolicy.builder(temp).build();
-        assertEquals(List.of(temp.toAbsolutePath().normalize()), policy.writableRoots());
-        assertEquals(List.of(temp.toAbsolutePath().normalize()), policy.readableRoots());
+        assertEquals(
+                io.github.sandboxdemo.core.Java8.listOf(temp.toAbsolutePath().normalize()),
+                policy.writableRoots());
+        assertEquals(
+                io.github.sandboxdemo.core.Java8.listOf(temp.toAbsolutePath().normalize()),
+                policy.readableRoots());
         assertEquals(ReadPolicy.DECLARED_ONLY, policy.readPolicy());
     }
 
@@ -45,7 +48,9 @@ class SandboxPolicyTest {
         SandboxPolicy policy =
                 SandboxPolicy.builder(temp).readOnlyWorkingDirectory().writableRoot(tests).build();
 
-        assertEquals(List.of(tests.toAbsolutePath().normalize()), policy.writableRoots());
+        assertEquals(
+                io.github.sandboxdemo.core.Java8.listOf(tests.toAbsolutePath().normalize()),
+                policy.writableRoots());
         assertEquals(true, policy.readableRoots().contains(temp.toAbsolutePath().normalize()));
     }
 }

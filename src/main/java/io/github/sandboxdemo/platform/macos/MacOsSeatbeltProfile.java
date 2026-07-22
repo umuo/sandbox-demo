@@ -10,7 +10,7 @@ import java.util.List;
 final class MacOsSeatbeltProfile {
 
     private static final List<String> RUNTIME_ROOTS =
-            List.of(
+            io.github.sandboxdemo.core.Java8.listOf(
                     "/System",
                     "/usr",
                     "/bin",
@@ -24,61 +24,60 @@ final class MacOsSeatbeltProfile {
                     "/dev");
 
     private static final String BASE_PROFILE =
-            """
-            (version 1)
-            (deny default)
-
-            ; The policy is inherited by descendants.
-            (allow process-exec)
-            (allow process-fork)
-            (allow signal (target same-sandbox))
-            (allow process-info* (target same-sandbox))
-
-            (allow file-write-data
-              (require-all (literal "/dev/null") (vnode-type CHARACTER-DEVICE)))
-
-            ; Runtime discovery only. Avoid blanket sysctl and Mach access.
-            (allow sysctl-read
-              (sysctl-name "hw.activecpu")
-              (sysctl-name "hw.byteorder")
-              (sysctl-name "hw.cpufamily")
-              (sysctl-name "hw.cputype")
-              (sysctl-name "hw.logicalcpu")
-              (sysctl-name "hw.logicalcpu_max")
-              (sysctl-name "hw.machine")
-              (sysctl-name "hw.memsize")
-              (sysctl-name "hw.ncpu")
-              (sysctl-name "hw.pagesize")
-              (sysctl-name "hw.physicalcpu")
-              (sysctl-name "hw.physicalcpu_max")
-              (sysctl-name-prefix "hw.optional.arm.")
-              (sysctl-name-prefix "hw.optional.armv8_")
-              (sysctl-name "kern.argmax")
-              (sysctl-name "kern.hostname")
-              (sysctl-name "kern.maxfilesperproc")
-              (sysctl-name "kern.maxproc")
-              (sysctl-name "kern.osproductversion")
-              (sysctl-name "kern.osrelease")
-              (sysctl-name "kern.ostype")
-              (sysctl-name "kern.osversion")
-              (sysctl-name "kern.version")
-              (sysctl-name "machdep.cpu.brand_string")
-              (sysctl-name "vm.loadavg"))
-            (allow sysctl-write (sysctl-name "kern.grade_cputype"))
-
-            (allow iokit-open (iokit-registry-entry-class "RootDomainUserClient"))
-            (allow mach-lookup
-              (global-name "com.apple.system.opendirectoryd.libinfo")
-              (global-name "com.apple.PowerManagement.control"))
-            (allow ipc-posix-sem)
-            (allow pseudo-tty)
-            (allow file-read* file-write* file-ioctl (literal "/dev/ptmx"))
-            (allow file-read* file-write*
-              (require-all
-                (regex #"^/dev/ttys[0-9]+")
-                (extension "com.apple.sandbox.pty")))
-            (allow file-ioctl (regex #"^/dev/ttys[0-9]+"))
-            """;
+            io.github.sandboxdemo.core.Java8.lines(
+                    "(version 1)",
+                    "(deny default)",
+                    "",
+                    "; The policy is inherited by descendants.",
+                    "(allow process-exec)",
+                    "(allow process-fork)",
+                    "(allow signal (target same-sandbox))",
+                    "(allow process-info* (target same-sandbox))",
+                    "",
+                    "(allow file-write-data",
+                    "  (require-all (literal \"/dev/null\") (vnode-type CHARACTER-DEVICE)))",
+                    "",
+                    "; Runtime discovery only. Avoid blanket sysctl and Mach access.",
+                    "(allow sysctl-read",
+                    "  (sysctl-name \"hw.activecpu\")",
+                    "  (sysctl-name \"hw.byteorder\")",
+                    "  (sysctl-name \"hw.cpufamily\")",
+                    "  (sysctl-name \"hw.cputype\")",
+                    "  (sysctl-name \"hw.logicalcpu\")",
+                    "  (sysctl-name \"hw.logicalcpu_max\")",
+                    "  (sysctl-name \"hw.machine\")",
+                    "  (sysctl-name \"hw.memsize\")",
+                    "  (sysctl-name \"hw.ncpu\")",
+                    "  (sysctl-name \"hw.pagesize\")",
+                    "  (sysctl-name \"hw.physicalcpu\")",
+                    "  (sysctl-name \"hw.physicalcpu_max\")",
+                    "  (sysctl-name-prefix \"hw.optional.arm.\")",
+                    "  (sysctl-name-prefix \"hw.optional.armv8_\")",
+                    "  (sysctl-name \"kern.argmax\")",
+                    "  (sysctl-name \"kern.hostname\")",
+                    "  (sysctl-name \"kern.maxfilesperproc\")",
+                    "  (sysctl-name \"kern.maxproc\")",
+                    "  (sysctl-name \"kern.osproductversion\")",
+                    "  (sysctl-name \"kern.osrelease\")",
+                    "  (sysctl-name \"kern.ostype\")",
+                    "  (sysctl-name \"kern.osversion\")",
+                    "  (sysctl-name \"kern.version\")",
+                    "  (sysctl-name \"machdep.cpu.brand_string\")",
+                    "  (sysctl-name \"vm.loadavg\"))",
+                    "(allow sysctl-write (sysctl-name \"kern.grade_cputype\"))",
+                    "",
+                    "(allow iokit-open (iokit-registry-entry-class \"RootDomainUserClient\"))",
+                    "(allow mach-lookup",
+                    "  (global-name \"com.apple.system.opendirectoryd.libinfo\")",
+                    "  (global-name \"com.apple.PowerManagement.control\"))",
+                    "(allow ipc-posix-sem)",
+                    "(allow pseudo-tty)",
+                    "(allow file-read* file-write* file-ioctl (literal \"/dev/ptmx\"))",
+                    "(allow file-read* file-write*",
+                    "  (require-all",
+                    "    (regex #\"^/dev/ttys[0-9]+\")",
+                    "    (extension \"com.apple.sandbox.pty\")))",
+                    "(allow file-ioctl (regex #\"^/dev/ttys[0-9]+\"))");
 
     private MacOsSeatbeltProfile() {}
 
@@ -122,8 +121,26 @@ final class MacOsSeatbeltProfile {
                     .append("(allow network-inbound)\n")
                     .append("(allow system-socket)\n");
         }
-        return new GeneratedProfile(profile.toString(), List.copyOf(definitions));
+        return new GeneratedProfile(
+                profile.toString(), io.github.sandboxdemo.core.Java8.copyList(definitions));
     }
 
-    record GeneratedProfile(String profile, List<String> definitions) {}
+    static final class GeneratedProfile {
+
+        private final String profile;
+        private final List<String> definitions;
+
+        GeneratedProfile(String profile, List<String> definitions) {
+            this.profile = profile;
+            this.definitions = definitions;
+        }
+
+        String profile() {
+            return profile;
+        }
+
+        List<String> definitions() {
+            return definitions;
+        }
+    }
 }

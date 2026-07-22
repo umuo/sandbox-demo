@@ -66,14 +66,14 @@ final class WindowsWorkerProtocol {
                 new DataInputStream(new BufferedInputStream(Files.newInputStream(file)))) {
             requireHeader(input, REQUEST_MAGIC);
             String expectedSid = readString(input);
-            Path executable = Path.of(readString(input));
+            Path executable = java.nio.file.Paths.get(readString(input));
             List<String> arguments = readStrings(input, MAX_ARGUMENTS);
             byte[] standardInput = readBytes(input, MAX_STANDARD_INPUT_BYTES);
-            Path cwd = Path.of(readString(input));
+            Path cwd = java.nio.file.Paths.get(readString(input));
             List<Path> readable = readPaths(input);
             List<Path> writable = readPaths(input);
             List<Path> protectedPaths = readPaths(input);
-            Path temp = Path.of(readString(input));
+            Path temp = java.nio.file.Paths.get(readString(input));
             int networkOrdinal = input.readInt();
             if (networkOrdinal < 0 || networkOrdinal >= NetworkPolicy.values().length) {
                 throw new SandboxException("invalid network policy in Windows worker request");
@@ -197,9 +197,9 @@ final class WindowsWorkerProtocol {
         List<String> values = readStrings(input, MAX_PATHS);
         List<Path> result = new ArrayList<>(values.size());
         for (String value : values) {
-            result.add(Path.of(value));
+            result.add(java.nio.file.Paths.get(value));
         }
-        return List.copyOf(result);
+        return io.github.sandboxdemo.core.Java8.copyList(result);
     }
 
     private static void writeMap(DataOutputStream output, Map<String, String> values)
@@ -221,7 +221,7 @@ final class WindowsWorkerProtocol {
                 throw new SandboxException("duplicate environment variable in worker request");
             }
         }
-        return Map.copyOf(result);
+        return io.github.sandboxdemo.core.Java8.copyMap(result);
     }
 
     private static void writeStrings(DataOutputStream output, List<String> values)
@@ -239,7 +239,7 @@ final class WindowsWorkerProtocol {
         for (int i = 0; i < count; i++) {
             result.add(readString(input));
         }
-        return List.copyOf(result);
+        return io.github.sandboxdemo.core.Java8.copyList(result);
     }
 
     private static int readCount(DataInputStream input, int maximum, String description)
@@ -270,37 +270,72 @@ final class WindowsWorkerProtocol {
         if (length < 0 || length > maximum) {
             throw new SandboxException("invalid binary field length: " + length);
         }
-        byte[] bytes = input.readNBytes(length);
-        if (bytes.length != length) {
-            throw new EOFException("expected " + length + " bytes but received " + bytes.length);
-        }
+        byte[] bytes = new byte[length];
+        input.readFully(bytes);
         return bytes;
     }
 
     private static String safeMessage(Throwable error) {
         String message = error.getMessage();
-        if (message == null || message.isBlank()) {
+        if (message == null || io.github.sandboxdemo.core.Java8.isBlank(message)) {
             return "no error message";
         }
         return message.length() <= 1000 ? message : message.substring(0, 1000);
     }
 
-    record WorkerRequest(
-            String expectedUserSid,
-            Path executable,
-            List<String> arguments,
-            byte[] standardInput,
-            ValidatedPolicy policy,
-            Map<String, String> environment,
-            List<String> capabilitySids) {
+    static final class WorkerRequest {
 
-        WorkerRequest {
-            standardInput = java.util.Arrays.copyOf(standardInput, standardInput.length);
+        private final String expectedUserSid;
+        private final Path executable;
+        private final List<String> arguments;
+        private final byte[] standardInput;
+        private final ValidatedPolicy policy;
+        private final Map<String, String> environment;
+        private final List<String> capabilitySids;
+
+        WorkerRequest(
+                String expectedUserSid,
+                Path executable,
+                List<String> arguments,
+                byte[] standardInput,
+                ValidatedPolicy policy,
+                Map<String, String> environment,
+                List<String> capabilitySids) {
+            this.expectedUserSid = expectedUserSid;
+            this.executable = executable;
+            this.arguments = arguments;
+            this.standardInput = java.util.Arrays.copyOf(standardInput, standardInput.length);
+            this.policy = policy;
+            this.environment = environment;
+            this.capabilitySids = capabilitySids;
         }
 
-        @Override
+        String expectedUserSid() {
+            return expectedUserSid;
+        }
+
+        Path executable() {
+            return executable;
+        }
+
+        List<String> arguments() {
+            return arguments;
+        }
+
         public byte[] standardInput() {
             return java.util.Arrays.copyOf(standardInput, standardInput.length);
+        }
+
+        ValidatedPolicy policy() {
+            return policy;
+        }
+
+        Map<String, String> environment() {
+            return environment;
+        }
+
+        List<String> capabilitySids() {
+            return capabilitySids;
         }
     }
 }

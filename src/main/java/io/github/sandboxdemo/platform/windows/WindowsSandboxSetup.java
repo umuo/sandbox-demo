@@ -96,7 +96,7 @@ public final class WindowsSandboxSetup {
             installation =
                     new WindowsSandboxInstallation(
                             normalizedHome,
-                            Path.of(System.getProperty("java.home")),
+                            java.nio.file.Paths.get(System.getProperty("java.home")),
                             new WindowsSandboxInstallation.Credential(
                                     WindowsSandboxInstallation.DEFAULT_OFFLINE_USER,
                                     offlineSid,
@@ -136,11 +136,11 @@ public final class WindowsSandboxSetup {
             } catch (IOException ignored) {
                 // The original setup error is more actionable.
             }
-            if (e instanceof InterruptedException interrupted) {
-                throw interrupted;
+            if (e instanceof InterruptedException) {
+                throw (InterruptedException) e;
             }
-            if (e instanceof SandboxException sandboxException) {
-                throw sandboxException;
+            if (e instanceof SandboxException) {
+                throw (SandboxException) e;
             }
             throw new SandboxException("failed to install the Windows sandbox", e);
         }
@@ -191,7 +191,7 @@ public final class WindowsSandboxSetup {
                     throw new SandboxException("Windows sandbox home is not a directory: " + home);
                 }
                 if (!Files.exists(marker)) {
-                    try (var entries = Files.list(home)) {
+                    try (java.util.stream.Stream<Path> entries = Files.list(home)) {
                         if (entries.findAny().isPresent()) {
                             throw new SandboxException(
                                     "refusing to take ownership of a non-empty directory without "
@@ -217,8 +217,10 @@ public final class WindowsSandboxSetup {
         if (!Files.exists(directory, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
             return;
         }
-        try (var paths = Files.walk(directory)) {
-            for (Path path : paths.sorted(java.util.Comparator.reverseOrder()).toList()) {
+        try (java.util.stream.Stream<Path> paths = Files.walk(directory)) {
+            for (Path path :
+                    paths.sorted(java.util.Comparator.reverseOrder())
+                            .collect(java.util.stream.Collectors.toList())) {
                 Files.deleteIfExists(path);
             }
         }
@@ -293,9 +295,9 @@ public final class WindowsSandboxSetup {
     private static void protectInstallationDirectory(Path home)
             throws SandboxException, InterruptedException {
         String systemRoot = System.getenv().getOrDefault("SystemRoot", "C:\\Windows");
-        Path icacls = Path.of(systemRoot, "System32", "icacls.exe");
+        Path icacls = java.nio.file.Paths.get(systemRoot, "System32", "icacls.exe");
         List<String> command =
-                List.of(
+                io.github.sandboxdemo.core.Java8.listOf(
                         icacls.toString(),
                         home.toString(),
                         "/inheritance:r",
@@ -306,7 +308,7 @@ public final class WindowsSandboxSetup {
                         "/Q");
         try {
             Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
-            byte[] output = process.getInputStream().readAllBytes();
+            byte[] output = io.github.sandboxdemo.core.Java8.readAllBytes(process.getInputStream());
             int exitCode = process.waitFor();
             if (exitCode != 0) {
                 throw new SandboxException(
@@ -346,7 +348,7 @@ public final class WindowsSandboxSetup {
 
     private static void unhideSandboxUsers() {
         for (String username :
-                List.of(
+                io.github.sandboxdemo.core.Java8.listOf(
                         WindowsSandboxInstallation.DEFAULT_OFFLINE_USER,
                         WindowsSandboxInstallation.DEFAULT_ONLINE_USER)) {
             try {
@@ -418,8 +420,8 @@ public final class WindowsSandboxSetup {
                 WindowsWorkerRuntime.classPathManifest(runtimeDirectory.getParent())
                         .getFileName()
                         .toString());
-        try (var paths = Files.list(runtimeDirectory)) {
-            for (Path path : paths.toList()) {
+        try (java.util.stream.Stream<Path> paths = Files.list(runtimeDirectory)) {
+            for (Path path : paths.collect(java.util.stream.Collectors.toList())) {
                 String name = path.getFileName().toString();
                 boolean managed =
                         name.matches("sandbox-runtime-[0-9]+-[0-9a-f]{16}\\.jar(\\.sha256)?")
@@ -440,8 +442,8 @@ public final class WindowsSandboxSetup {
             throws SandboxException, InterruptedException {
         String systemRoot = System.getenv().getOrDefault("SystemRoot", "C:\\Windows");
         List<String> command =
-                List.of(
-                        Path.of(systemRoot, "System32", "icacls.exe").toString(),
+                io.github.sandboxdemo.core.Java8.listOf(
+                        java.nio.file.Paths.get(systemRoot, "System32", "icacls.exe").toString(),
                         path.toString(),
                         "/grant",
                         "*" + offlineSid + ":(OI)(CI)(RX)",
@@ -455,15 +457,16 @@ public final class WindowsSandboxSetup {
             throws SandboxException, InterruptedException {
         String systemRoot = System.getenv().getOrDefault("SystemRoot", "C:\\Windows");
         for (Path path :
-                List.of(
+                io.github.sandboxdemo.core.Java8.listOf(
                         installation.javaHome(),
                         WindowsWorkerRuntime.runtimeDirectory(installation.home()))) {
             if (!Files.exists(path)) {
                 continue;
             }
             List<String> command =
-                    List.of(
-                            Path.of(systemRoot, "System32", "icacls.exe").toString(),
+                    io.github.sandboxdemo.core.Java8.listOf(
+                            java.nio.file.Paths.get(systemRoot, "System32", "icacls.exe")
+                                    .toString(),
                             path.toString(),
                             "/remove:g",
                             "*" + installation.offline().sid(),
@@ -483,8 +486,9 @@ public final class WindowsSandboxSetup {
                 continue;
             }
             List<String> command =
-                    List.of(
-                            Path.of(systemRoot, "System32", "icacls.exe").toString(),
+                    io.github.sandboxdemo.core.Java8.listOf(
+                            java.nio.file.Paths.get(systemRoot, "System32", "icacls.exe")
+                                    .toString(),
                             entry.path().toString(),
                             "/remove:g",
                             "*" + entry.sid(),
@@ -498,7 +502,7 @@ public final class WindowsSandboxSetup {
             throws SandboxException, InterruptedException {
         try {
             Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
-            byte[] output = process.getInputStream().readAllBytes();
+            byte[] output = io.github.sandboxdemo.core.Java8.readAllBytes(process.getInputStream());
             int exitCode = process.waitFor();
             if (exitCode != 0) {
                 throw new SandboxException(

@@ -12,7 +12,6 @@ import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
-import java.util.HexFormat;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -24,7 +23,8 @@ final class WindowsWorkerRuntime {
     private static final String CLASSPATH_MANIFEST = "worker-classpath.txt";
     private static final int MAX_RUNTIME_JARS = 16;
     private static final List<Class<?>> REQUIRED_CLASSES =
-            List.of(WindowsSandboxWorker.class, Native.class, Advapi32Util.class);
+            io.github.sandboxdemo.core.Java8.listOf(
+                    WindowsSandboxWorker.class, Native.class, Advapi32Util.class);
 
     private final Path javaExecutable;
     private final List<Path> classPath;
@@ -84,7 +84,7 @@ final class WindowsWorkerRuntime {
                             "cannot locate packaged runtime for " + requiredClass.getName());
                 }
                 Path source =
-                        Path.of(
+                        java.nio.file.Paths.get(
                                         requiredClass
                                                 .getProtectionDomain()
                                                 .getCodeSource()
@@ -103,7 +103,7 @@ final class WindowsWorkerRuntime {
                 requireRootClassEntry(source, requiredClass);
                 result.add(source);
             }
-            return List.copyOf(result);
+            return io.github.sandboxdemo.core.Java8.copyList(result);
         } catch (java.net.URISyntaxException | IOException e) {
             throw new SandboxException("failed to resolve packaged Windows worker JARs", e);
         }
@@ -136,7 +136,8 @@ final class WindowsWorkerRuntime {
             String value = sha256(workerJar) + System.lineSeparator();
             Path checksum = checksumFile(workerJar);
             Path temporary = Files.createTempFile(checksum.getParent(), "worker-sha256-", ".tmp");
-            Files.writeString(temporary, value, java.nio.charset.StandardCharsets.US_ASCII);
+            io.github.sandboxdemo.core.Java8.writeString(
+                    temporary, value, java.nio.charset.StandardCharsets.US_ASCII);
             try {
                 Files.move(
                         temporary,
@@ -154,7 +155,7 @@ final class WindowsWorkerRuntime {
     private static void verifyChecksum(Path workerJar) throws SandboxException {
         Path checksum = checksumFile(workerJar);
         try {
-            String expected = Files.readString(checksum).trim();
+            String expected = io.github.sandboxdemo.core.Java8.readString(checksum).trim();
             String actual = sha256(workerJar);
             if (!MessageDigest.isEqual(
                     expected.getBytes(java.nio.charset.StandardCharsets.US_ASCII),
@@ -204,7 +205,7 @@ final class WindowsWorkerRuntime {
             verifyChecksum(workerJar);
             result.add(workerJar);
         }
-        return List.copyOf(result);
+        return io.github.sandboxdemo.core.Java8.copyList(result);
     }
 
     private static boolean overlaps(Path first, Path second) {
@@ -214,14 +215,14 @@ final class WindowsWorkerRuntime {
     private static String sha256(Path path) throws IOException, SandboxException {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            try (var input = Files.newInputStream(path)) {
+            try (java.io.InputStream input = Files.newInputStream(path)) {
                 byte[] buffer = new byte[64 * 1024];
                 int count;
                 while ((count = input.read(buffer)) >= 0) {
                     digest.update(buffer, 0, count);
                 }
             }
-            return HexFormat.of().formatHex(digest.digest());
+            return io.github.sandboxdemo.core.Java8.toHex(digest.digest());
         } catch (NoSuchAlgorithmException impossible) {
             throw new SandboxException("SHA-256 is unavailable in this Java runtime", impossible);
         }

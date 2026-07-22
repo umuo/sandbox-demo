@@ -75,7 +75,7 @@ public final class ProcessExecutor {
             inputTask =
                     readers.submit(
                             () -> {
-                                try (var input = process.getOutputStream()) {
+                                try (java.io.OutputStream input = process.getOutputStream()) {
                                     input.write(standardInput);
                                     input.flush();
                                 } catch (IOException ignored) {
@@ -85,7 +85,7 @@ public final class ProcessExecutor {
                             });
         }
 
-        Set<ProcessHandle> observedDescendants = ConcurrentHashMap.newKeySet();
+        Set<Object> observedDescendants = ConcurrentHashMap.newKeySet();
         boolean timedOut = false;
         try {
             timedOut = !waitAndTrack(process, policy.timeout(), observedDescendants);
@@ -120,21 +120,23 @@ public final class ProcessExecutor {
     }
 
     private static boolean waitAndTrack(
-            Process process, Duration timeout, Set<ProcessHandle> observedDescendants)
+            Process process, Duration timeout, Set<Object> observedDescendants)
             throws InterruptedException {
         long deadline = System.nanoTime() + timeout.toNanos();
         while (true) {
             if (process.isAlive()) {
-                observedDescendants.addAll(safeDescendants(process.toHandle()));
+                observedDescendants.addAll(safeDescendants(processHandle(process)));
             }
-            for (ProcessHandle descendant : List.copyOf(observedDescendants)) {
-                if (descendant.isAlive()) {
+            for (Object descendant :
+                    io.github.sandboxdemo.core.Java8.copyList(observedDescendants)) {
+                if (isHandleAlive(descendant)) {
                     observedDescendants.addAll(safeDescendants(descendant));
                 }
             }
             boolean treeAlive =
                     process.isAlive()
-                            || observedDescendants.stream().anyMatch(ProcessHandle::isAlive);
+                            || observedDescendants.stream()
+                                    .anyMatch(ProcessExecutor::isHandleAlive);
             if (!treeAlive) {
                 return true;
             }
@@ -167,12 +169,13 @@ public final class ProcessExecutor {
         }
     }
 
-    private static void terminateProcessTree(
-            Process process, Set<ProcessHandle> observedDescendants) {
-        observedDescendants.addAll(safeDescendants(process.toHandle()));
-        List<ProcessHandle> descendants = new ArrayList<>(observedDescendants);
+    private static void terminateProcessTree(Process process, Set<Object> observedDescendants) {
+        observedDescendants.addAll(safeDescendants(processHandle(process)));
+        List<Object> descendants = new ArrayList<>(observedDescendants);
         Collections.reverse(descendants);
-        descendants.stream().filter(ProcessHandle::isAlive).forEach(ProcessExecutor::destroy);
+        descendants.stream()
+                .filter(ProcessExecutor::isHandleAlive)
+                .forEach(ProcessExecutor::destroy);
         if (process.isAlive()) {
             process.destroy();
         }
@@ -183,7 +186,7 @@ public final class ProcessExecutor {
                 Thread.sleep(250);
             }
             descendants.stream()
-                    .filter(ProcessHandle::isAlive)
+                    .filter(ProcessExecutor::isHandleAlive)
                     .forEach(ProcessExecutor::destroyForcibly);
             if (process.isAlive()) {
                 process.destroyForcibly();
@@ -191,7 +194,7 @@ public final class ProcessExecutor {
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
             descendants.stream()
-                    .filter(ProcessHandle::isAlive)
+                    .filter(ProcessExecutor::isHandleAlive)
                     .forEach(ProcessExecutor::destroyForcibly);
             if (process.isAlive()) {
                 process.destroyForcibly();
@@ -199,28 +202,55 @@ public final class ProcessExecutor {
         }
     }
 
-    private static List<ProcessHandle> safeDescendants(ProcessHandle process) {
+    private static Object processHandle(Process process) {
         try {
-            return process.descendants().toList();
-        } catch (RuntimeException unavailable) {
-            // Some outer sandboxes deny process-table inspection. Platform-native
-            // PID namespaces/Job Objects remain the primary process-tree boundary.
-            return List.of();
+            return Process.class.getMethod("toHandle").invoke(process);
+        } catch (ReflectiveOperationException | RuntimeException unavailable) {
+            return null;
         }
     }
 
-    private static void destroy(ProcessHandle process) {
+    private static List<Object> safeDescendants(Object process) {
+        if (process == null) {
+            return io.github.sandboxdemo.core.Java8.listOf();
+        }
         try {
-            process.destroy();
-        } catch (RuntimeException ignored) {
+            Class<?> processHandle = Class.forName("java.lang.ProcessHandle");
+            Object descendants = processHandle.getMethod("descendants").invoke(process);
+            try (java.util.stream.Stream<?> stream = (java.util.stream.Stream<?>) descendants) {
+                return stream.map(value -> (Object) value)
+                        .collect(java.util.stream.Collectors.toList());
+            }
+        } catch (ReflectiveOperationException | RuntimeException unavailable) {
+            // Some outer sandboxes deny process-table inspection. Platform-native
+            // PID namespaces/Job Objects remain the primary process-tree boundary.
+            return io.github.sandboxdemo.core.Java8.listOf();
+        }
+    }
+
+    private static boolean isHandleAlive(Object process) {
+        try {
+            Class<?> processHandle = Class.forName("java.lang.ProcessHandle");
+            return (Boolean) processHandle.getMethod("isAlive").invoke(process);
+        } catch (ReflectiveOperationException | RuntimeException unavailable) {
+            return false;
+        }
+    }
+
+    private static void destroy(Object process) {
+        try {
+            Class<?> processHandle = Class.forName("java.lang.ProcessHandle");
+            processHandle.getMethod("destroy").invoke(process);
+        } catch (ReflectiveOperationException | RuntimeException ignored) {
             // A later force-kill or the native sandbox lifecycle is the fallback.
         }
     }
 
-    private static void destroyForcibly(ProcessHandle process) {
+    private static void destroyForcibly(Object process) {
         try {
-            process.destroyForcibly();
-        } catch (RuntimeException ignored) {
+            Class<?> processHandle = Class.forName("java.lang.ProcessHandle");
+            processHandle.getMethod("destroyForcibly").invoke(process);
+        } catch (ReflectiveOperationException | RuntimeException ignored) {
             // The native sandbox launcher may already have reaped the process.
         }
     }

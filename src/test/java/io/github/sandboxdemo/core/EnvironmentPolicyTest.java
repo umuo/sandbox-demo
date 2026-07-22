@@ -20,7 +20,10 @@ class EnvironmentPolicyTest {
     void excludesHostSecretsButIncludesExplicitValues() throws Exception {
         SandboxPolicy policy = SandboxPolicy.builder(workspace).build();
         SandboxRequest request =
-                new SandboxRequest(policy, CommandSpec.of("tool"), Map.of("EXPLICIT_VALUE", "ok"));
+                new SandboxRequest(
+                        policy,
+                        CommandSpec.of("tool"),
+                        io.github.sandboxdemo.core.Java8.mapOf("EXPLICIT_VALUE", "ok"));
 
         ValidatedPolicy validated = PathPolicyValidator.validate(policy);
         try {
@@ -44,6 +47,7 @@ class EnvironmentPolicyTest {
                         new SandboxRequest(
                                 policy,
                                 CommandSpec.of("tool"),
-                                Map.of("TEMP", workspace.resolve("escape").toString())));
+                                io.github.sandboxdemo.core.Java8.mapOf(
+                                        "TEMP", workspace.resolve("escape").toString())));
     }
 }

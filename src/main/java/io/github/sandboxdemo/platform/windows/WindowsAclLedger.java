@@ -33,7 +33,7 @@ final class WindowsAclLedger {
                             StandardOpenOption.CREATE,
                             StandardOpenOption.READ,
                             StandardOpenOption.WRITE)) {
-                try (var ignored = channel.lock()) {
+                try (java.nio.channels.FileLock ignored = channel.lock()) {
                     byte[] current = new byte[(int) channel.size()];
                     channel.position(0);
                     ByteBuffer currentBuffer = ByteBuffer.wrap(current);
@@ -44,7 +44,7 @@ final class WindowsAclLedger {
                     }
                     Set<String> entries =
                             new LinkedHashSet<>(
-                                    List.of(
+                                    io.github.sandboxdemo.core.Java8.listOf(
                                             new String(current, StandardCharsets.UTF_8)
                                                     .split("\\R")));
                     entries.remove("");
@@ -70,21 +70,21 @@ final class WindowsAclLedger {
 
     List<Entry> entries() throws SandboxException {
         if (!Files.isRegularFile(file)) {
-            return List.of();
+            return io.github.sandboxdemo.core.Java8.listOf();
         }
         try {
             java.util.ArrayList<Entry> result = new java.util.ArrayList<>();
             for (String line : Files.readAllLines(file, StandardCharsets.UTF_8)) {
-                if (line.isBlank()) {
+                if (io.github.sandboxdemo.core.Java8.isBlank(line)) {
                     continue;
                 }
                 String[] parts = line.split("\\t", 2);
                 if (parts.length != 2) {
                     throw new SandboxException("invalid Windows workspace ACL ledger entry");
                 }
-                result.add(new Entry(Path.of(decode(parts[0])), parts[1]));
+                result.add(new Entry(java.nio.file.Paths.get(decode(parts[0])), parts[1]));
             }
-            return List.copyOf(result);
+            return io.github.sandboxdemo.core.Java8.copyList(result);
         } catch (IOException | IllegalArgumentException e) {
             throw new SandboxException("failed to read Windows workspace ACL metadata", e);
         }
@@ -108,5 +108,22 @@ final class WindowsAclLedger {
         return new String(Base64.getUrlDecoder().decode(value), StandardCharsets.UTF_8);
     }
 
-    record Entry(Path path, String sid) {}
+    static final class Entry {
+
+        private final Path path;
+        private final String sid;
+
+        Entry(Path path, String sid) {
+            this.path = path;
+            this.sid = sid;
+        }
+
+        Path path() {
+            return path;
+        }
+
+        String sid() {
+            return sid;
+        }
+    }
 }

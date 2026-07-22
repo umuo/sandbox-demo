@@ -83,20 +83,21 @@ final class WindowsSandboxSession implements AutoCloseable {
 
     private void grantWorker(String sid) throws SandboxException, InterruptedException {
         runIcacls(
-                List.of(directory.toString(), "/grant", "*" + sid + ":(OI)(CI)(M)", "/Q"),
+                io.github.sandboxdemo.core.Java8.listOf(
+                        directory.toString(), "/grant", "*" + sid + ":(OI)(CI)(M)", "/Q"),
                 "grant Windows worker session access");
     }
 
     private static void runIcacls(List<String> arguments, String operation)
             throws SandboxException, InterruptedException {
         String systemRoot = System.getenv().getOrDefault("SystemRoot", "C:\\Windows");
-        Path icacls = Path.of(systemRoot, "System32", "icacls.exe");
+        Path icacls = java.nio.file.Paths.get(systemRoot, "System32", "icacls.exe");
         java.util.ArrayList<String> command = new java.util.ArrayList<>();
         command.add(icacls.toString());
         command.addAll(arguments);
         try {
             Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
-            byte[] output = process.getInputStream().readAllBytes();
+            byte[] output = io.github.sandboxdemo.core.Java8.readAllBytes(process.getInputStream());
             int exitCode = process.waitFor();
             if (exitCode != 0) {
                 throw new SandboxException(
@@ -121,7 +122,7 @@ final class WindowsSandboxSession implements AutoCloseable {
         if (!Files.exists(directory)) {
             return;
         }
-        try (var paths = Files.walk(directory)) {
+        try (java.util.stream.Stream<Path> paths = Files.walk(directory)) {
             paths.sorted(Comparator.reverseOrder())
                     .forEach(
                             path -> {

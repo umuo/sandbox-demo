@@ -66,9 +66,9 @@ public final class PathPolicyValidator {
             effectiveWritable.add(temp);
             return new ValidatedPolicy(
                     cwd,
-                    List.copyOf(effectiveReadable),
-                    List.copyOf(effectiveWritable),
-                    List.copyOf(protectedPaths),
+                    io.github.sandboxdemo.core.Java8.copyList(effectiveReadable),
+                    io.github.sandboxdemo.core.Java8.copyList(effectiveWritable),
+                    io.github.sandboxdemo.core.Java8.copyList(protectedPaths),
                     temp,
                     policy.networkPolicy(),
                     policy.readPolicy(),
@@ -117,7 +117,7 @@ public final class PathPolicyValidator {
         if (directory == null || !Files.exists(directory, LinkOption.NOFOLLOW_LINKS)) {
             return;
         }
-        try (var paths = Files.walk(directory)) {
+        try (java.util.stream.Stream<Path> paths = Files.walk(directory)) {
             paths.sorted(Comparator.reverseOrder())
                     .forEach(
                             path -> {

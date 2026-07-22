@@ -3,30 +3,62 @@ package io.github.sandboxdemo.api;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Arrays;
+import java.util.Objects;
 
 /** Captured result of one sandboxed process tree. */
-public record SandboxResult(
-        int exitCode,
-        boolean timedOut,
-        byte[] stdout,
-        byte[] stderr,
-        boolean stdoutTruncated,
-        boolean stderrTruncated,
-        Duration duration) {
+public final class SandboxResult {
 
-    public SandboxResult {
-        stdout = Arrays.copyOf(stdout, stdout.length);
-        stderr = Arrays.copyOf(stderr, stderr.length);
+    private final int exitCode;
+    private final boolean timedOut;
+    private final byte[] stdout;
+    private final byte[] stderr;
+    private final boolean stdoutTruncated;
+    private final boolean stderrTruncated;
+    private final Duration duration;
+
+    public SandboxResult(
+            int exitCode,
+            boolean timedOut,
+            byte[] stdout,
+            byte[] stderr,
+            boolean stdoutTruncated,
+            boolean stderrTruncated,
+            Duration duration) {
+        this.exitCode = exitCode;
+        this.timedOut = timedOut;
+        this.stdout = Arrays.copyOf(stdout, stdout.length);
+        this.stderr = Arrays.copyOf(stderr, stderr.length);
+        this.stdoutTruncated = stdoutTruncated;
+        this.stderrTruncated = stderrTruncated;
+        this.duration = duration;
     }
 
-    @Override
+    public int exitCode() {
+        return exitCode;
+    }
+
+    public boolean timedOut() {
+        return timedOut;
+    }
+
     public byte[] stdout() {
         return Arrays.copyOf(stdout, stdout.length);
     }
 
-    @Override
     public byte[] stderr() {
         return Arrays.copyOf(stderr, stderr.length);
+    }
+
+    public boolean stdoutTruncated() {
+        return stdoutTruncated;
+    }
+
+    public boolean stderrTruncated() {
+        return stderrTruncated;
+    }
+
+    public Duration duration() {
+        return duration;
     }
 
     public String stdoutUtf8() {
@@ -39,5 +71,49 @@ public record SandboxResult(
 
     public boolean successful() {
         return !timedOut && exitCode == 0;
+    }
+
+    @Override
+    public boolean equals(Object other) {
+        if (this == other) {
+            return true;
+        }
+        if (!(other instanceof SandboxResult)) {
+            return false;
+        }
+        SandboxResult that = (SandboxResult) other;
+        return exitCode == that.exitCode
+                && timedOut == that.timedOut
+                && stdoutTruncated == that.stdoutTruncated
+                && stderrTruncated == that.stderrTruncated
+                && Arrays.equals(stdout, that.stdout)
+                && Arrays.equals(stderr, that.stderr)
+                && Objects.equals(duration, that.duration);
+    }
+
+    @Override
+    public int hashCode() {
+        int result = Objects.hash(exitCode, timedOut, stdoutTruncated, stderrTruncated, duration);
+        result = 31 * result + Arrays.hashCode(stdout);
+        return 31 * result + Arrays.hashCode(stderr);
+    }
+
+    @Override
+    public String toString() {
+        return "SandboxResult[exitCode="
+                + exitCode
+                + ", timedOut="
+                + timedOut
+                + ", stdout="
+                + Arrays.toString(stdout)
+                + ", stderr="
+                + Arrays.toString(stderr)
+                + ", stdoutTruncated="
+                + stdoutTruncated
+                + ", stderrTruncated="
+                + stderrTruncated
+                + ", duration="
+                + duration
+                + "]";
     }
 }

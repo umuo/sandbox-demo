@@ -11,11 +11,11 @@
     <description>OS-enforced Java process sandbox SDK for Windows, Linux and macOS.</description>
 
     <properties>
-        <maven.compiler.release>17</maven.compiler.release>
+        <maven.compiler.release>8</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <jna.version>5.19.1</jna.version>
         <junit.version>5.11.4</junit.version>
-        <spotless.version>2.43.0</spotless.version>
+        <spotless.version>2.30.0</spotless.version>
     </properties>
 
     <dependencies>
@@ -58,7 +58,7 @@
                         <configuration>
                             <rules>
                                 <requireJavaVersion>
-                                    <version>[17,)</version>
+                                    <version>[1.8,)</version>
                                 </requireJavaVersion>
                                 <requireMavenVersion>
                                     <version>[3.6.3,)</version>
@@ -129,7 +129,7 @@
                 <configuration>
                     <java>
                         <googleJavaFormat>
-                            <version>1.22.0</version>
+                            <version>1.7</version>
                             <style>AOSP</style>
                         </googleJavaFormat>
                         <removeUnusedImports/>

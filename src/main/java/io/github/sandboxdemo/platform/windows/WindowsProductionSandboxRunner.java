@@ -12,7 +12,6 @@ import io.github.sandboxdemo.core.ExecutableResolver;
 import io.github.sandboxdemo.core.PathPolicyValidator;
 import io.github.sandboxdemo.core.ValidatedPolicy;
 import java.nio.file.Path;
-import java.util.List;
 import java.util.Map;
 
 /**
@@ -69,7 +68,10 @@ public final class WindowsProductionSandboxRunner implements SandboxRunner {
             try (WindowsPathLease ignored = WindowsPathLease.acquire(policy, executable);
                     WindowsAclManager.WindowsAclLease acl =
                             new WindowsAclManager(installation.home())
-                                    .apply(policy, List.of(credential.sid()));
+                                    .apply(
+                                            policy,
+                                            io.github.sandboxdemo.core.Java8.listOf(
+                                                    credential.sid()));
                     WindowsSandboxSession session =
                             WindowsSandboxSession.create(installation.home(), credential.sid())) {
                 WindowsWorkerProtocol.WorkerRequest workerRequest =
@@ -92,8 +94,8 @@ public final class WindowsProductionSandboxRunner implements SandboxRunner {
 
     private static Path configuredHome() {
         String configured = System.getenv("SANDBOX_WINDOWS_HOME");
-        return configured == null || configured.isBlank()
+        return configured == null || io.github.sandboxdemo.core.Java8.isBlank(configured)
                 ? WindowsSandboxInstallation.defaultHome()
-                : Path.of(configured);
+                : java.nio.file.Paths.get(configured);
     }
 }

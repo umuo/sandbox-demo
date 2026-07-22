@@ -12,7 +12,8 @@ class SandboxRequestBuilderTest {
 
     @Test
     void buildsAnAgentRequestWithoutImplicitShellParsing() {
-        Path workspace = Path.of("target", "sdk-builder-workspace").toAbsolutePath();
+        Path workspace =
+                java.nio.file.Paths.get("target", "sdk-builder-workspace").toAbsolutePath();
 
         SandboxRequest request =
                 SandboxRequest.builder(workspace, "/usr/bin/git")
@@ -26,7 +27,9 @@ class SandboxRequestBuilderTest {
                         .build();
 
         assertEquals("/usr/bin/git", request.command().executable());
-        assertEquals(java.util.List.of("status", "--short"), request.command().arguments());
+        assertEquals(
+                io.github.sandboxdemo.core.Java8.listOf("status", "--short"),
+                request.command().arguments());
         assertEquals("C.UTF-8", request.environment().get("LANG"));
         assertEquals(
                 "request body",
@@ -36,7 +39,8 @@ class SandboxRequestBuilderTest {
 
     @Test
     void reservedEnvironmentVariablesRemainSandboxControlled() {
-        Path workspace = Path.of("target", "sdk-builder-workspace").toAbsolutePath();
+        Path workspace =
+                java.nio.file.Paths.get("target", "sdk-builder-workspace").toAbsolutePath();
         SandboxRequest.Builder request =
                 SandboxRequest.builder(workspace, "/bin/true").environment("HOME", "/tmp/fake");
 
@@ -45,7 +49,8 @@ class SandboxRequestBuilderTest {
 
     @Test
     void standardInputIsBoundedAndDefensivelyCopied() {
-        Path workspace = Path.of("target", "sdk-builder-workspace").toAbsolutePath();
+        Path workspace =
+                java.nio.file.Paths.get("target", "sdk-builder-workspace").toAbsolutePath();
         byte[] input = new byte[] {1, 2, 3};
         SandboxRequest request =
                 SandboxRequest.builder(workspace, "/bin/true").standardInput(input).build();

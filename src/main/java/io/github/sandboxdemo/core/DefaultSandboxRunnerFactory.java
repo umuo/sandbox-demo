@@ -16,13 +16,17 @@ public final class DefaultSandboxRunnerFactory {
     }
 
     public static SandboxRunner create(Path windowsHome) {
-        return switch (OperatingSystem.current()) {
-            case LINUX -> new LinuxBubblewrapSandboxRunner();
-            case MACOS -> new MacOsSeatbeltSandboxRunner();
-            case WINDOWS ->
-                    windowsHome == null
-                            ? new WindowsProductionSandboxRunner()
-                            : new WindowsProductionSandboxRunner(windowsHome);
-        };
+        switch (OperatingSystem.current()) {
+            case LINUX:
+                return new LinuxBubblewrapSandboxRunner();
+            case MACOS:
+                return new MacOsSeatbeltSandboxRunner();
+            case WINDOWS:
+                return windowsHome == null
+                        ? new WindowsProductionSandboxRunner()
+                        : new WindowsProductionSandboxRunner(windowsHome);
+            default:
+                throw new IllegalStateException("unsupported operating system");
+        }
     }
 }

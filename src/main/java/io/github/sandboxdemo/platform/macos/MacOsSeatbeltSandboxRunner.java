@@ -22,7 +22,7 @@ import java.util.concurrent.TimeUnit;
 /** macOS strategy backed by Apple Seatbelt through /usr/bin/sandbox-exec. */
 public final class MacOsSeatbeltSandboxRunner implements SandboxRunner {
 
-    private static final Path SANDBOX_EXEC = Path.of("/usr/bin/sandbox-exec");
+    private static final Path SANDBOX_EXEC = java.nio.file.Paths.get("/usr/bin/sandbox-exec");
 
     @Override
     public String backendName() {
@@ -36,7 +36,7 @@ public final class MacOsSeatbeltSandboxRunner implements SandboxRunner {
                     "macOS Seatbelt launcher is unavailable: " + SANDBOX_EXEC);
         }
         List<String> command =
-                List.of(
+                io.github.sandboxdemo.core.Java8.listOf(
                         SANDBOX_EXEC.toString(),
                         "-p",
                         "(version 1)\n(allow default)\n",
@@ -60,7 +60,10 @@ public final class MacOsSeatbeltSandboxRunner implements SandboxRunner {
         }
         String output;
         try {
-            output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            output =
+                    new String(
+                            io.github.sandboxdemo.core.Java8.readAllBytes(process.getInputStream()),
+                            StandardCharsets.UTF_8);
         } catch (IOException e) {
             throw new SandboxException("failed to read macOS Seatbelt readiness output", e);
         }
@@ -164,7 +167,10 @@ public final class MacOsSeatbeltSandboxRunner implements SandboxRunner {
 
         String output;
         try {
-            output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            output =
+                    new String(
+                            io.github.sandboxdemo.core.Java8.readAllBytes(process.getInputStream()),
+                            StandardCharsets.UTF_8);
         } catch (IOException e) {
             throw new SandboxException("failed to read the macOS Seatbelt readiness probe", e);
         }

@@ -10,10 +10,15 @@ public enum SandboxPlatform {
 
     /** Returns the platform of the current JVM. */
     public static SandboxPlatform current() {
-        return switch (OperatingSystem.current()) {
-            case WINDOWS -> WINDOWS;
-            case LINUX -> LINUX;
-            case MACOS -> MACOS;
-        };
+        switch (OperatingSystem.current()) {
+            case WINDOWS:
+                return WINDOWS;
+            case LINUX:
+                return LINUX;
+            case MACOS:
+                return MACOS;
+            default:
+                throw new IllegalStateException("unsupported operating system");
+        }
     }
 }

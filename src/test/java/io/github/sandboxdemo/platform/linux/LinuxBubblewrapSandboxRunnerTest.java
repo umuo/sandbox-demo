@@ -29,8 +29,8 @@ class LinuxBubblewrapSandboxRunnerTest {
     @Test
     void permitsWorkspaceWriteAndBlocksSiblingWrite() throws Exception {
         Assumptions.assumeTrue(
-                Files.isExecutable(Path.of("/usr/bin/bwrap"))
-                        || Files.isExecutable(Path.of("/bin/bwrap")),
+                Files.isExecutable(java.nio.file.Paths.get("/usr/bin/bwrap"))
+                        || Files.isExecutable(java.nio.file.Paths.get("/bin/bwrap")),
                 "bubblewrap is not installed");
         Path workspace = Files.createDirectory(root.resolve("workspace"));
         Path outside = Files.createDirectory(root.resolve("outside"));
@@ -62,9 +62,9 @@ class LinuxBubblewrapSandboxRunnerTest {
     @Test
     void seccompAllowsIpSocketsOnlyWhenNetworkIsAllowed() throws Exception {
         Path bash =
-                Files.isExecutable(Path.of("/bin/bash"))
-                        ? Path.of("/bin/bash")
-                        : Path.of("/usr/bin/bash");
+                Files.isExecutable(java.nio.file.Paths.get("/bin/bash"))
+                        ? java.nio.file.Paths.get("/bin/bash")
+                        : java.nio.file.Paths.get("/usr/bin/bash");
         Assumptions.assumeTrue(Files.isExecutable(bash), "bash with /dev/tcp is not installed");
         Path workspace = Files.createDirectory(root.resolve("network-workspace"));
         LinuxBubblewrapSandboxRunner runner = new LinuxBubblewrapSandboxRunner();
@@ -87,8 +87,12 @@ class LinuxBubblewrapSandboxRunnerTest {
                     "this bash does not support a loopback /dev/tcp probe: "
                             + allowed.stderrUtf8());
             allowedServer.setSoTimeout(2_000);
-            try (var accepted = allowedServer.accept()) {
-                assertTrue(new String(accepted.getInputStream().readAllBytes()).contains("probe"));
+            try (java.net.Socket accepted = allowedServer.accept()) {
+                assertTrue(
+                        new String(
+                                        io.github.sandboxdemo.core.Java8.readAllBytes(
+                                                accepted.getInputStream()))
+                                .contains("probe"));
             }
         }
 

@@ -12,7 +12,6 @@ import io.github.sandboxdemo.api.SandboxResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
-import java.util.Map;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
@@ -66,7 +65,7 @@ class WindowsProductionSandboxRunnerTest {
                         new SandboxRequest(
                                 policy,
                                 cmd("if defined SECRET_TEST_VALUE (exit /b 9) else (exit /b 0)"),
-                                Map.of()));
+                                io.github.sandboxdemo.core.Java8.mapOf()));
         assertTrue(environmentResult.successful(), environmentResult.stderrUtf8());
 
         SandboxResult stdinResult =
@@ -74,7 +73,7 @@ class WindowsProductionSandboxRunnerTest {
                         new SandboxRequest(
                                 policy,
                                 powershell("[Console]::Out.Write([Console]::In.ReadToEnd())"),
-                                Map.of(),
+                                io.github.sandboxdemo.core.Java8.mapOf(),
                                 "sdk-stdin".getBytes(java.nio.charset.StandardCharsets.UTF_8)));
         assertTrue(stdinResult.successful(), stdinResult.stderrUtf8());
         assertTrue(stdinResult.stdoutUtf8().contains("sdk-stdin"));
@@ -125,7 +124,8 @@ class WindowsProductionSandboxRunnerTest {
         Path project = Files.createDirectory(root.resolve("selective-project"));
         Path writableTests = Files.createDirectories(project.resolve("src/test/java"));
         Path readableAppData = Files.createDirectory(root.resolve("readable-appdata"));
-        Files.writeString(readableAppData.resolve("input.txt"), "read-ok");
+        io.github.sandboxdemo.core.Java8.writeString(
+                readableAppData.resolve("input.txt"), "read-ok");
         Path blocked = project.resolve("blocked.txt");
         Path allowed = writableTests.resolve("allowed.txt");
 
@@ -161,13 +161,22 @@ class WindowsProductionSandboxRunnerTest {
     private static CommandSpec cmd(String command) {
         String systemRoot = System.getenv().getOrDefault("SystemRoot", "C:\\Windows");
         return CommandSpec.of(
-                Path.of(systemRoot, "System32", "cmd.exe").toString(), "/d", "/s", "/c", command);
+                java.nio.file.Paths.get(systemRoot, "System32", "cmd.exe").toString(),
+                "/d",
+                "/s",
+                "/c",
+                command);
     }
 
     private static CommandSpec powershell(String command) {
         String systemRoot = System.getenv().getOrDefault("SystemRoot", "C:\\Windows");
         return CommandSpec.of(
-                Path.of(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+                java.nio.file.Paths.get(
+                                systemRoot,
+                                "System32",
+                                "WindowsPowerShell",
+                                "v1.0",
+                                "powershell.exe")
                         .toString(),
                 "-NoLogo",
                 "-NoProfile",

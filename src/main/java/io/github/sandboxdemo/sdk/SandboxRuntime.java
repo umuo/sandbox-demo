@@ -52,13 +52,14 @@ public final class SandboxRuntime {
     static SandboxCapabilities capabilities(SandboxPlatform platform, String backendName) {
         Set<ReadPolicy> readPolicies =
                 platform == SandboxPlatform.WINDOWS
-                        ? Set.of(ReadPolicy.HOST)
-                        : Set.of(ReadPolicy.DECLARED_ONLY, ReadPolicy.HOST);
+                        ? io.github.sandboxdemo.core.Java8.setOf(ReadPolicy.HOST)
+                        : io.github.sandboxdemo.core.Java8.setOf(
+                                ReadPolicy.DECLARED_ONLY, ReadPolicy.HOST);
         return new SandboxCapabilities(
                 platform,
                 backendName,
                 readPolicies,
-                Set.of(NetworkPolicy.ALLOW, NetworkPolicy.DENY),
+                io.github.sandboxdemo.core.Java8.setOf(NetworkPolicy.ALLOW, NetworkPolicy.DENY),
                 platform == SandboxPlatform.WINDOWS);
     }
 
@@ -66,19 +67,19 @@ public final class SandboxRuntime {
             SandboxPlatform platform, Path windowsHome, String backendName) {
         SandboxCapabilities capabilities = capabilities(platform, backendName);
         try {
-            return switch (platform) {
-                case WINDOWS -> {
+            switch (platform) {
+                case WINDOWS:
                     WindowsSandboxSetup.verify(windowsHome);
-                    yield new SandboxRuntimeStatus(capabilities, true, "Windows runtime verified");
-                }
-                case LINUX -> {
-                    yield new SandboxRuntimeStatus(
+                    return new SandboxRuntimeStatus(capabilities, true, "Windows runtime verified");
+                case LINUX:
+                    return new SandboxRuntimeStatus(
                             capabilities, true, LinuxBubblewrapSandboxRunner.probeBackend());
-                }
-                case MACOS ->
-                        new SandboxRuntimeStatus(
-                                capabilities, true, MacOsSeatbeltSandboxRunner.probeBackend());
-            };
+                case MACOS:
+                    return new SandboxRuntimeStatus(
+                            capabilities, true, MacOsSeatbeltSandboxRunner.probeBackend());
+                default:
+                    throw new IllegalStateException("unsupported platform: " + platform);
+            }
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
             return new SandboxRuntimeStatus(capabilities, false, "readiness check interrupted");
@@ -87,17 +88,22 @@ public final class SandboxRuntime {
             return new SandboxRuntimeStatus(
                     capabilities,
                     false,
-                    message == null || message.isBlank()
+                    message == null || io.github.sandboxdemo.core.Java8.isBlank(message)
                             ? error.getClass().getSimpleName()
                             : message);
         }
     }
 
     private static String defaultBackendName(SandboxPlatform platform) {
-        return switch (platform) {
-            case WINDOWS -> "windows-dedicated-user-restricted-token";
-            case LINUX -> "linux-bubblewrap";
-            case MACOS -> "macos-seatbelt";
-        };
+        switch (platform) {
+            case WINDOWS:
+                return "windows-dedicated-user-restricted-token";
+            case LINUX:
+                return "linux-bubblewrap";
+            case MACOS:
+                return "macos-seatbelt";
+            default:
+                throw new IllegalStateException("unsupported platform: " + platform);
+        }
     }
 }

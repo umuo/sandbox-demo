@@ -28,8 +28,9 @@ class WindowsNativeStructureTest {
 
     @Test
     void sizeReferenceCanBeConstructedReflectivelyByJna() throws Exception {
-        var type = WindowsNative.SIZE_TByReference.class;
-        var constructor = type.getConstructor();
+        Class<WindowsNative.SIZE_TByReference> type = WindowsNative.SIZE_TByReference.class;
+        java.lang.reflect.Constructor<WindowsNative.SIZE_TByReference> constructor =
+                type.getConstructor();
 
         assertTrue(Modifier.isPublic(type.getModifiers()));
         assertTrue(Modifier.isPublic(constructor.getModifiers()));

@@ -17,8 +17,8 @@ public final class WindowsSandboxWorker {
         if (args.length != 2) {
             System.exit(2);
         }
-        Path requestFile = Path.of(args[0]);
-        Path resultFile = Path.of(args[1]);
+        Path requestFile = java.nio.file.Paths.get(args[0]);
+        Path resultFile = java.nio.file.Paths.get(args[1]);
         try {
             WindowsWorkerProtocol.WorkerRequest request =
                     WindowsWorkerProtocol.readRequest(requestFile);
@@ -71,7 +71,7 @@ public final class WindowsSandboxWorker {
 
     private static String safeMessage(Throwable error) {
         String message = error.getMessage();
-        if (message == null || message.isBlank()) {
+        if (message == null || io.github.sandboxdemo.core.Java8.isBlank(message)) {
             return "no error message";
         }
         return message.length() <= 2000 ? message : message.substring(0, 2000);

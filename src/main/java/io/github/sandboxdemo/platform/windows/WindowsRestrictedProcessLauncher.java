@@ -108,7 +108,10 @@ final class WindowsRestrictedProcessLauncher {
             stdinRead = stdin[0];
             stdinWrite.set(stdin[1]);
 
-            attributeHandles = createHandleList(List.of(stdinRead, stdoutWrite, stderrWrite));
+            attributeHandles =
+                    createHandleList(
+                            io.github.sandboxdemo.core.Java8.listOf(
+                                    stdinRead, stdoutWrite, stderrWrite));
             job = createKillOnCloseJob();
 
             WindowsNative.STARTUPINFOEX startup = new WindowsNative.STARTUPINFOEX();
@@ -437,7 +440,7 @@ final class WindowsRestrictedProcessLauncher {
     private static long positiveEnvironmentLong(String name, long defaultValue)
             throws SandboxException {
         String configured = System.getenv(name);
-        if (configured == null || configured.isBlank()) {
+        if (configured == null || io.github.sandboxdemo.core.Java8.isBlank(configured)) {
             return defaultValue;
         }
         try {
@@ -493,8 +496,8 @@ final class WindowsRestrictedProcessLauncher {
             task.get(5, TimeUnit.SECONDS);
         } catch (ExecutionException e) {
             Throwable cause = e.getCause();
-            if (cause instanceof SandboxException sandboxException) {
-                throw sandboxException;
+            if (cause instanceof SandboxException) {
+                throw (SandboxException) cause;
             }
             throw new SandboxException("failed to provide Windows sandbox stdin", cause);
         } catch (TimeoutException e) {
@@ -537,8 +540,8 @@ final class WindowsRestrictedProcessLauncher {
             return task.get();
         } catch (ExecutionException e) {
             Throwable cause = e.getCause();
-            if (cause instanceof SandboxException sandboxException) {
-                throw sandboxException;
+            if (cause instanceof SandboxException) {
+                throw (SandboxException) cause;
             }
             throw new SandboxException("failed to capture Windows sandbox output", cause);
         }
@@ -562,7 +565,39 @@ final class WindowsRestrictedProcessLauncher {
         }
     }
 
-    private record CapturedOutput(byte[] bytes, boolean truncated) {}
+    private static final class CapturedOutput {
 
-    private record HandleList(Pointer attributeList, Memory handleArray) {}
+        private final byte[] bytes;
+        private final boolean truncated;
+
+        private CapturedOutput(byte[] bytes, boolean truncated) {
+            this.bytes = bytes;
+            this.truncated = truncated;
+        }
+
+        byte[] bytes() {
+            return bytes;
+        }
+
+        boolean truncated() {
+            return truncated;
+        }
+    }
+
+    private static final class HandleList {
+
+        private final Pointer attributeList;
+
+        @SuppressWarnings("unused")
+        private final Memory handleArray;
+
+        private HandleList(Pointer attributeList, Memory handleArray) {
+            this.attributeList = attributeList;
+            this.handleArray = handleArray;
+        }
+
+        Pointer attributeList() {
+            return attributeList;
+        }
+    }
 }

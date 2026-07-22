@@ -69,7 +69,7 @@ final class WindowsAclManager {
     }
 
     WindowsAclLease apply(ValidatedPolicy policy) throws SandboxException, InterruptedException {
-        return apply(policy, List.of());
+        return apply(policy, io.github.sandboxdemo.core.Java8.listOf());
     }
 
     WindowsAclLease apply(ValidatedPolicy policy, List<String> sandboxUserSids)
@@ -303,8 +303,8 @@ final class WindowsAclManager {
                 List<String> capabilitySids,
                 List<AclMutation> mutations) {
             this.manager = manager;
-            this.capabilitySids = List.copyOf(capabilitySids);
-            this.mutations = List.copyOf(mutations);
+            this.capabilitySids = io.github.sandboxdemo.core.Java8.copyList(capabilitySids);
+            this.mutations = io.github.sandboxdemo.core.Java8.copyList(mutations);
         }
 
         List<String> capabilitySids() {
@@ -320,7 +320,29 @@ final class WindowsAclManager {
         }
     }
 
-    private record AclMutation(Path path, String sid, boolean deny) {
+    private static final class AclMutation {
+
+        private final Path path;
+        private final String sid;
+        private final boolean deny;
+
+        private AclMutation(Path path, String sid, boolean deny) {
+            this.path = path;
+            this.sid = sid;
+            this.deny = deny;
+        }
+
+        Path path() {
+            return path;
+        }
+
+        String sid() {
+            return sid;
+        }
+
+        boolean deny() {
+            return deny;
+        }
 
         static AclMutation grant(Path path, String sid) {
             return new AclMutation(path, sid, false);

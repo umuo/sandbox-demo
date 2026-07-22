@@ -50,8 +50,8 @@ class SandboxClientTest {
                 new SandboxCapabilities(
                         SandboxPlatform.current(),
                         fake.backendName(),
-                        java.util.Set.of(ReadPolicy.DECLARED_ONLY),
-                        java.util.Set.of(NetworkPolicy.DENY),
+                        io.github.sandboxdemo.core.Java8.setOf(ReadPolicy.DECLARED_ONLY),
+                        io.github.sandboxdemo.core.Java8.setOf(NetworkPolicy.DENY),
                         false);
         SandboxClient client =
                 SandboxClient.builder()
@@ -60,7 +60,7 @@ class SandboxClientTest {
                                 capabilities,
                                 () -> new SandboxRuntimeStatus(capabilities, true, "test ready"))
                         .build();
-        Path workspace = Path.of("target", "sdk-client-workspace").toAbsolutePath();
+        Path workspace = java.nio.file.Paths.get("target", "sdk-client-workspace").toAbsolutePath();
         SandboxPolicy policy = SandboxPolicy.builder(workspace).build();
         SandboxRequest request = SandboxRequest.of(policy, CommandSpec.of("/bin/true"));
 

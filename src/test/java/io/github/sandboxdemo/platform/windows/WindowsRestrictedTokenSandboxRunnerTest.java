@@ -46,7 +46,7 @@ class WindowsRestrictedTokenSandboxRunnerTest {
     private static CommandSpec cmdWrite(Path target) {
         String systemRoot = System.getenv().getOrDefault("SystemRoot", "C:\\Windows");
         return CommandSpec.of(
-                Path.of(systemRoot, "System32", "cmd.exe").toString(),
+                java.nio.file.Paths.get(systemRoot, "System32", "cmd.exe").toString(),
                 "/d",
                 "/s",
                 "/c",
