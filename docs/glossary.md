@@ -198,7 +198,7 @@ restricted token 中触发第二次访问检查的 SID。正常 SID 检查和 re
 
 ### `LUA_TOKEN`
 
-产生 Limited User Account 风格 token 的标志。
+产生 UAC/Limited User Account 风格过滤 token 的标志。本项目不启用它；这里的 Windows 写边界由去 privilege、restricting SID 和 `WRITE_RESTRICTED` 提供。
 
 ### Security Descriptor
 

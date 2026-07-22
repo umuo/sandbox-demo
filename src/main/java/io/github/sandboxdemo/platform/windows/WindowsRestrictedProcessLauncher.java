@@ -40,7 +40,6 @@ final class WindowsRestrictedProcessLauncher {
     private static final int TOKEN_ADJUST_SESSIONID = 0x0100;
 
     private static final int DISABLE_MAX_PRIVILEGE = 0x00000001;
-    private static final int LUA_TOKEN = 0x00000004;
     private static final int WRITE_RESTRICTED = 0x00000008;
 
     private static final int HANDLE_FLAG_INHERIT = 0x00000001;
@@ -306,7 +305,11 @@ final class WindowsRestrictedProcessLauncher {
         }
 
         PointerByReference restricted = new PointerByReference();
-        int flags = DISABLE_MAX_PRIVILEGE | LUA_TOKEN | WRITE_RESTRICTED;
+        // LUA_TOKEN is UAC filtering, not a general sandbox restriction. In particular, applying
+        // it to a primary token that was not built as one half of a UAC split token can leave a
+        // CreateProcessAsUserW child unable to finish DLL initialization. Privilege removal and
+        // the capability-SID write check are provided independently by these two flags.
+        int flags = DISABLE_MAX_PRIVILEGE | WRITE_RESTRICTED;
         if (!Advapi32.INSTANCE.CreateRestrictedToken(
                 base,
                 flags,

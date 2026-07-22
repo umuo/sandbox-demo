@@ -81,20 +81,20 @@ Security Identifier，Windows 用来标识用户、组、登录会话或合成�
 本项目使用：
 
 ```text
-DISABLE_MAX_PRIVILEGE | LUA_TOKEN | WRITE_RESTRICTED
+DISABLE_MAX_PRIVILEGE | WRITE_RESTRICTED
 ```
 
 ### `DISABLE_MAX_PRIVILEGE`
 
 关闭新 token 中除基础遍历权限外的大部分 privilege，减少命令通过系统级 privilege 绕过普通 ACL 的能力。
 
-### `LUA_TOKEN`
-
-生成 Limited User Account 风格的 token，使其采用受限用户语义，而不是继承高权限上下文。
-
 ### `WRITE_RESTRICTED`
 
 让 restricting SID 只参与写访问检查。这是当前 Windows 后端“广泛读取、限制写入”的核心。
+
+### 为什么不使用 `LUA_TOKEN`
+
+`LUA_TOKEN` 用于构造 UAC/Limited User Account 风格的过滤 token，不是通用沙箱限制。生产后端已经使用专用非管理员账户；开发后端和生产后端的写边界都由 `DISABLE_MAX_PRIVILEGE`、restricting SID 与 `WRITE_RESTRICTED` 共同提供。把 `LUA_TOKEN` 叠加到普通 primary token 上会引入依赖 UAC 特定 token 状态的启动语义，并可能让 `CreateProcessAsUserW` 创建的进程在 DLL 初始化阶段直接退出。因此这里明确不启用它。
 
 Windows 会对写访问执行两次判断：
 
