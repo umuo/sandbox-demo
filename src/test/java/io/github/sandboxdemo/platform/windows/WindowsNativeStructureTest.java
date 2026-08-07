@@ -3,6 +3,7 @@ package io.github.sandboxdemo.platform.windows;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.sun.jna.Memory;
 import com.sun.jna.Native;
 import com.sun.jna.NativeMappedConverter;
 import java.lang.reflect.Modifier;
@@ -19,6 +20,23 @@ class WindowsNativeStructureTest {
         assertEquals(expectedTrusteeSize, new WindowsNative.TRUSTEE().size());
         assertEquals(expectedExplicitAccessSize, new WindowsNative.EXPLICIT_ACCESS().size());
         assertEquals(Native.POINTER_SIZE, new WindowsNative.TOKEN_DEFAULT_DACL().size());
+    }
+
+    @Test
+    void nativeLsaStructuresAndStringLengthsMatchAbi() {
+        int expectedObjectAttributesSize = Native.POINTER_SIZE == 8 ? 48 : 24;
+        int expectedUnicodeStringSize = Native.POINTER_SIZE == 8 ? 16 : 8;
+        String value = "SeInteractiveLogonRight";
+        int lengthBytes = value.length() * Native.WCHAR_SIZE;
+        Memory buffer = WindowsNative.wideString(value);
+        WindowsNative.LSA_UNICODE_STRING string =
+                new WindowsNative.LSA_UNICODE_STRING(buffer, lengthBytes);
+
+        assertEquals(
+                expectedObjectAttributesSize, new WindowsNative.LSA_OBJECT_ATTRIBUTES().size());
+        assertEquals(expectedUnicodeStringSize, string.size());
+        assertEquals(lengthBytes, Short.toUnsignedInt(string.Length));
+        assertEquals(lengthBytes + Native.WCHAR_SIZE, Short.toUnsignedInt(string.MaximumLength));
     }
 
     @Test

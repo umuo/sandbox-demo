@@ -1,5 +1,7 @@
 package io.github.sandboxdemo.platform.windows;
 
+import com.sun.jna.Memory;
+import com.sun.jna.Native;
 import com.sun.jna.platform.win32.Advapi32;
 import com.sun.jna.platform.win32.Advapi32Util;
 import com.sun.jna.platform.win32.Kernel32;
@@ -8,6 +10,7 @@ import com.sun.jna.platform.win32.Netapi32;
 import com.sun.jna.platform.win32.WinNT;
 import com.sun.jna.platform.win32.WinReg;
 import com.sun.jna.ptr.IntByReference;
+import com.sun.jna.ptr.PointerByReference;
 import io.github.sandboxdemo.api.SandboxException;
 import io.github.sandboxdemo.core.OperatingSystem;
 import java.io.IOException;
@@ -28,6 +31,11 @@ public final class WindowsSandboxSetup {
     private static final int UF_SCRIPT = 0x0001;
     private static final int UF_PASSWD_CANT_CHANGE = 0x0040;
     private static final int UF_DONT_EXPIRE_PASSWD = 0x10000;
+    private static final int POLICY_LOOKUP_NAMES = 0x00000800;
+    private static final int POLICY_CREATE_ACCOUNT = 0x00000010;
+    private static final int LOGON32_LOGON_INTERACTIVE = 2;
+    private static final int LOGON32_PROVIDER_DEFAULT = 0;
+    private static final String LOGON_LOCALLY_RIGHT = "SeInteractiveLogonRight";
     private static final SecureRandom RANDOM = new SecureRandom();
     private static final String USER_LIST_KEY =
             "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon\\SpecialAccounts\\UserList";
@@ -54,6 +62,8 @@ public final class WindowsSandboxSetup {
         WindowsSandboxInstallation installation =
                 WindowsSandboxInstallation.load(home.toAbsolutePath().normalize());
         installation.verifyAccounts();
+        verifyInteractiveLogon(installation.offline());
+        verifyInteractiveLogon(installation.online());
         WindowsFirewall.verify(installation.offline().sid());
         WindowsWorkerRuntime.verifyInstalled(installation);
     }
@@ -66,6 +76,10 @@ public final class WindowsSandboxSetup {
         if (Files.exists(marker)) {
             WindowsSandboxInstallation existing = WindowsSandboxInstallation.load(normalizedHome);
             existing.verifyAccounts();
+            grantLogonLocally(existing.offline());
+            grantLogonLocally(existing.online());
+            verifyInteractiveLogon(existing.offline());
+            verifyInteractiveLogon(existing.online());
             try {
                 cleanupKnownTree(normalizedHome.resolve("sessions"));
             } catch (IOException e) {
@@ -91,20 +105,28 @@ public final class WindowsSandboxSetup {
 
             String offlineSid = accountSid(WindowsSandboxInstallation.DEFAULT_OFFLINE_USER);
             String onlineSid = accountSid(WindowsSandboxInstallation.DEFAULT_ONLINE_USER);
+            WindowsSandboxInstallation.Credential offline =
+                    new WindowsSandboxInstallation.Credential(
+                            WindowsSandboxInstallation.DEFAULT_OFFLINE_USER,
+                            offlineSid,
+                            offlinePassword);
+            WindowsSandboxInstallation.Credential online =
+                    new WindowsSandboxInstallation.Credential(
+                            WindowsSandboxInstallation.DEFAULT_ONLINE_USER,
+                            onlineSid,
+                            onlinePassword);
+            grantLogonLocally(offline);
+            grantLogonLocally(online);
+            verifyInteractiveLogon(offline);
+            verifyInteractiveLogon(online);
             Files.createDirectories(normalizedHome);
             protectInstallationDirectory(normalizedHome);
             installation =
                     new WindowsSandboxInstallation(
                             normalizedHome,
                             java.nio.file.Paths.get(System.getProperty("java.home")),
-                            new WindowsSandboxInstallation.Credential(
-                                    WindowsSandboxInstallation.DEFAULT_OFFLINE_USER,
-                                    offlineSid,
-                                    offlinePassword),
-                            new WindowsSandboxInstallation.Credential(
-                                    WindowsSandboxInstallation.DEFAULT_ONLINE_USER,
-                                    onlineSid,
-                                    onlinePassword));
+                            offline,
+                            online);
             installation.save();
             installWorkerRuntime(installation);
             hideSandboxUsers();
@@ -276,6 +298,89 @@ public final class WindowsSandboxSetup {
         } catch (RuntimeException e) {
             throw new SandboxException("failed to resolve SID for local user: " + username, e);
         }
+    }
+
+    /**
+     * CreateProcessWithLogonW uses an interactive logon token. Do not rely on the machine's
+     * membership/default policy for the dedicated accounts: domain security baselines commonly
+     * remove the Users group's local-logon right, which otherwise surfaces only as Win32=1385 at
+     * execution time.
+     */
+    private static void grantLogonLocally(WindowsSandboxInstallation.Credential credential)
+            throws SandboxException {
+        PointerByReference sid = new PointerByReference();
+        if (!WindowsNative.Advapi32.INSTANCE.ConvertStringSidToSidW(
+                new com.sun.jna.WString(credential.sid()), sid)) {
+            throw new SandboxException(
+                    "ConvertStringSidToSidW("
+                            + credential.username()
+                            + ") failed, Win32="
+                            + Native.getLastError());
+        }
+
+        PointerByReference policy = new PointerByReference();
+        try {
+            WindowsNative.LSA_OBJECT_ATTRIBUTES attributes =
+                    new WindowsNative.LSA_OBJECT_ATTRIBUTES();
+            int status =
+                    WindowsNative.Advapi32.INSTANCE.LsaOpenPolicy(
+                            null, attributes, POLICY_LOOKUP_NAMES | POLICY_CREATE_ACCOUNT, policy);
+            checkLsaStatus(status, "LsaOpenPolicy for " + credential.username());
+
+            Memory rightMemory = WindowsNative.wideString(LOGON_LOCALLY_RIGHT);
+            WindowsNative.LSA_UNICODE_STRING right =
+                    new WindowsNative.LSA_UNICODE_STRING(
+                            rightMemory, LOGON_LOCALLY_RIGHT.length() * Native.WCHAR_SIZE);
+            right.write();
+            status =
+                    WindowsNative.Advapi32.INSTANCE.LsaAddAccountRights(
+                            policy.getValue(),
+                            sid.getValue(),
+                            new WindowsNative.LSA_UNICODE_STRING[] {right},
+                            1);
+            checkLsaStatus(status, "LsaAddAccountRights(" + credential.username() + ")");
+        } finally {
+            if (policy.getValue() != null) {
+                WindowsNative.Advapi32.INSTANCE.LsaClose(policy.getValue());
+            }
+            if (sid.getValue() != null) {
+                WindowsNative.Kernel32.INSTANCE.LocalFree(sid.getValue());
+            }
+        }
+    }
+
+    private static void checkLsaStatus(int status, String operation) throws SandboxException {
+        if (status != 0) {
+            int win32 = WindowsNative.Advapi32.INSTANCE.LsaNtStatusToWinError(status);
+            throw new SandboxException(operation + " failed, Win32=" + win32);
+        }
+    }
+
+    private static void verifyInteractiveLogon(WindowsSandboxInstallation.Credential credential)
+            throws SandboxException {
+        WinNT.HANDLEByReference token = new WinNT.HANDLEByReference();
+        if (!Advapi32.INSTANCE.LogonUser(
+                credential.username(),
+                ".",
+                credential.password(),
+                LOGON32_LOGON_INTERACTIVE,
+                LOGON32_PROVIDER_DEFAULT,
+                token)) {
+            int error = Kernel32.INSTANCE.GetLastError();
+            if (error == 1385) {
+                throw new SandboxException(
+                        "interactive logon verification failed for "
+                                + credential.username()
+                                + ", Win32=1385: grant 'Log on locally' and remove any applicable "
+                                + "'Deny log on locally' local or domain policy");
+            }
+            throw new SandboxException(
+                    "interactive logon verification failed for "
+                            + credential.username()
+                            + ", Win32="
+                            + error);
+        }
+        Kernel32.INSTANCE.CloseHandle(token.getValue());
     }
 
     private static String currentUserSid() throws SandboxException {

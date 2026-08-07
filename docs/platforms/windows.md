@@ -43,9 +43,10 @@ flowchart TD
 3. 使用当前真实用户的 DPAPI 加密密码并保存安装元数据；
 4. 安装、校验可信 worker runtime；
 5. 给 sandbox 用户授予 Java runtime 的读取/执行权限；
-6. 给 offline 用户安装 Windows Firewall 入站和出站阻断规则；
-7. 隐藏登录界面中的沙箱账户；
-8. 收紧安装目录 ACL。
+6. 给两个 sandbox 用户授予 `SeInteractiveLogonRight`（`Log on locally`），供 `CreateProcessWithLogonW` 启动 worker；
+7. 给 offline 用户安装 Windows Firewall 入站和出站阻断规则；
+8. 隐藏登录界面中的沙箱账户；
+9. 收紧安装目录 ACL。
 
 ### Run 阶段
 

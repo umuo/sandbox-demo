@@ -119,7 +119,7 @@ setup 会：
 2. 用当前真实用户的 DPAPI 加密随机账户密码；
 3. 安装 offline 账户的入站/出站阻断规则，并确认所有 Firewall profile 已启用；
 4. 把版本一致的 worker JAR 安装进受保护目录；
-5. 给专用账户授予 Java runtime 的读取/执行权限。
+5. 给专用账户授予 Java runtime 的读取/执行权限，以及启动 worker 所需的 `Log on locally` 权限。
 
 日常 Java Agent 必须以普通用户运行。每次命令会选用 online/offline 账户，创建短期随机 capability SID，配置 workspace ACL，以专用账户启动 worker，再由 worker 创建 write-restricted token、private desktop 和受 Job Object 管理的目标进程。
 

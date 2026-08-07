@@ -190,6 +190,22 @@ final class WindowsNative {
                 STARTUPINFOEX startupInfo,
                 PROCESS_INFORMATION processInformation);
 
+        int LsaOpenPolicy(
+                LSA_UNICODE_STRING systemName,
+                LSA_OBJECT_ATTRIBUTES objectAttributes,
+                int desiredAccess,
+                PointerByReference policyHandle);
+
+        int LsaAddAccountRights(
+                Pointer policyHandle,
+                Pointer accountSid,
+                LSA_UNICODE_STRING[] userRights,
+                int countOfRights);
+
+        int LsaClose(Pointer policyHandle);
+
+        int LsaNtStatusToWinError(int status);
+
         boolean CreateProcessWithLogonW(
                 WString username,
                 WString domain,
@@ -346,6 +362,42 @@ final class WindowsNative {
         public Pointer hThread;
         public int dwProcessId;
         public int dwThreadId;
+    }
+
+    @Structure.FieldOrder({
+        "Length",
+        "RootDirectory",
+        "ObjectName",
+        "Attributes",
+        "SecurityDescriptor",
+        "SecurityQualityOfService"
+    })
+    public static class LSA_OBJECT_ATTRIBUTES extends Structure {
+        public int Length;
+        public Pointer RootDirectory;
+        public Pointer ObjectName;
+        public int Attributes;
+        public Pointer SecurityDescriptor;
+        public Pointer SecurityQualityOfService;
+
+        public LSA_OBJECT_ATTRIBUTES() {
+            Length = size();
+        }
+    }
+
+    @Structure.FieldOrder({"Length", "MaximumLength", "Buffer"})
+    public static class LSA_UNICODE_STRING extends Structure {
+        public short Length;
+        public short MaximumLength;
+        public Pointer Buffer;
+
+        public LSA_UNICODE_STRING() {}
+
+        LSA_UNICODE_STRING(Pointer buffer, int lengthBytes) {
+            Buffer = buffer;
+            Length = (short) lengthBytes;
+            MaximumLength = (short) (lengthBytes + Native.WCHAR_SIZE);
+        }
     }
 
     @Structure.FieldOrder({

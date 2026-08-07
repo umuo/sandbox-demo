@@ -70,7 +70,16 @@ final class WindowsWorkerLauncher {
                             startup,
                             process);
             if (!created) {
-                throw win32("CreateProcessWithLogonW(worker)");
+                int error = Native.getLastError();
+                if (error == 1385) {
+                    throw new SandboxException(
+                            "CreateProcessWithLogonW(worker) failed, Win32=1385: Windows has not "
+                                    + "granted 'Log on locally' to the sandbox account "
+                                    + credential.username()
+                                    + "; rerun setup-windows from an elevated terminal or grant "
+                                    + "SeInteractiveLogonRight and remove any applicable 'Deny log on locally' policy");
+                }
+                throw win32("CreateProcessWithLogonW(worker)", error);
             }
             process.read();
             if (!Kernel32.INSTANCE.AssignProcessToJobObject(job, process.hProcess)) {
