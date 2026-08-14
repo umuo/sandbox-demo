@@ -101,7 +101,11 @@ class SandboxClientTest {
                                 () -> new SandboxRuntimeStatus(capabilities, true, "test ready"))
                         .build();
         Path workspace = java.nio.file.Paths.get("target", "sdk-client-workspace").toAbsolutePath();
-        SandboxPolicy policy = SandboxPolicy.builder(workspace).build();
+        SandboxPolicy policy =
+                SandboxPolicy.builder(workspace)
+                        .readPolicy(ReadPolicy.DECLARED_ONLY)
+                        .network(NetworkPolicy.DENY)
+                        .build();
         SandboxRequest request = SandboxRequest.of(policy, CommandSpec.of("/bin/true"));
 
         SandboxResult actual = client.execute(request);
@@ -146,7 +150,10 @@ class SandboxClientTest {
                         .build();
         Path workspace = java.nio.file.Paths.get("target", "sdk-client-workspace").toAbsolutePath();
         SandboxRequest unsupported =
-                SandboxRequest.builder(workspace, "/bin/true").network(NetworkPolicy.ALLOW).build();
+                SandboxRequest.builder(workspace, "/bin/true")
+                        .readPolicy(ReadPolicy.DECLARED_ONLY)
+                        .network(NetworkPolicy.ALLOW)
+                        .build();
 
         SandboxBackendUnavailableException error =
                 assertThrows(

@@ -18,7 +18,10 @@ class MacOsSeatbeltProfileTest {
     @Test
     void declaredReadPolicyDoesNotEnableBlanketHostReads() throws Exception {
         ValidatedPolicy policy =
-                PathPolicyValidator.validate(SandboxPolicy.builder(workspace).build());
+                PathPolicyValidator.validate(
+                        SandboxPolicy.builder(workspace)
+                                .readPolicy(ReadPolicy.DECLARED_ONLY)
+                                .build());
         try {
             MacOsSeatbeltProfile.GeneratedProfile generated = MacOsSeatbeltProfile.generate(policy);
             assertFalse(generated.profile().contains("\n(allow file-read*)\n"));
@@ -48,7 +51,10 @@ class MacOsSeatbeltProfileTest {
     void readOnlyWorkingDirectoryGrantsWritesOnlyToPrivateTemp() throws Exception {
         ValidatedPolicy policy =
                 PathPolicyValidator.validate(
-                        SandboxPolicy.builder(workspace).readOnlyWorkingDirectory().build());
+                        SandboxPolicy.builder(workspace)
+                                .readOnlyWorkingDirectory()
+                                .readPolicy(ReadPolicy.DECLARED_ONLY)
+                                .build());
         try {
             MacOsSeatbeltProfile.GeneratedProfile generated = MacOsSeatbeltProfile.generate(policy);
             java.util.List<String> writableDefinitions =

@@ -11,6 +11,8 @@ import io.github.sandboxdemo.api.SandboxResult;
 import io.github.sandboxdemo.sdk.SandboxClient;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import org.junit.jupiter.api.Assumptions;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
@@ -20,6 +22,13 @@ import org.junit.jupiter.api.io.TempDir;
 class WindowsRestrictedTokenSandboxRunnerTest {
 
     @TempDir Path root;
+
+    @BeforeEach
+    void requireUnelevatedTestProcess() {
+        Assumptions.assumeFalse(
+                com.sun.jna.platform.win32.Advapi32Util.isCurrentProcessElevated(),
+                "setup-free Windows backend intentionally rejects elevated processes");
+    }
 
     @Test
     void defaultClientAndReadinessProbeRequireNoSetup() throws Exception {
