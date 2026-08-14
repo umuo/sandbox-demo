@@ -1,5 +1,6 @@
 package io.github.sandboxdemo.core;
 
+import io.github.sandboxdemo.api.DeletionPolicy;
 import io.github.sandboxdemo.api.NetworkPolicy;
 import io.github.sandboxdemo.api.ReadPolicy;
 import java.nio.file.Path;
@@ -15,6 +16,7 @@ public final class ValidatedPolicy {
     private final Path privateTempDirectory;
     private final NetworkPolicy networkPolicy;
     private final ReadPolicy readPolicy;
+    private final DeletionPolicy deletionPolicy;
     private final Duration timeout;
     private final int maxOutputBytes;
     private final boolean allowPathSearch;
@@ -27,6 +29,7 @@ public final class ValidatedPolicy {
             Path privateTempDirectory,
             NetworkPolicy networkPolicy,
             ReadPolicy readPolicy,
+            DeletionPolicy deletionPolicy,
             Duration timeout,
             int maxOutputBytes,
             boolean allowPathSearch) {
@@ -37,6 +40,7 @@ public final class ValidatedPolicy {
         this.privateTempDirectory = privateTempDirectory;
         this.networkPolicy = networkPolicy;
         this.readPolicy = readPolicy;
+        this.deletionPolicy = deletionPolicy;
         this.timeout = timeout;
         this.maxOutputBytes = maxOutputBytes;
         this.allowPathSearch = allowPathSearch;
@@ -68,6 +72,10 @@ public final class ValidatedPolicy {
 
     public ReadPolicy readPolicy() {
         return readPolicy;
+    }
+
+    public DeletionPolicy deletionPolicy() {
+        return deletionPolicy;
     }
 
     public Duration timeout() {

@@ -12,7 +12,9 @@ public final class SandboxCapabilities {
     private final String backendName;
     private final Set<ReadPolicy> supportedReadPolicies;
     private final Set<NetworkPolicy> supportedNetworkPolicies;
+    private final Set<DeletionPolicy> supportedDeletionPolicies;
     private final boolean installationRequired;
+    private final SandboxEnforcement enforcement;
 
     public SandboxCapabilities(
             SandboxPlatform platform,
@@ -20,6 +22,41 @@ public final class SandboxCapabilities {
             Set<ReadPolicy> supportedReadPolicies,
             Set<NetworkPolicy> supportedNetworkPolicies,
             boolean installationRequired) {
+        this(
+                platform,
+                backendName,
+                supportedReadPolicies,
+                supportedNetworkPolicies,
+                Collections.singleton(DeletionPolicy.ALLOW),
+                installationRequired,
+                SandboxEnforcement.FULL);
+    }
+
+    public SandboxCapabilities(
+            SandboxPlatform platform,
+            String backendName,
+            Set<ReadPolicy> supportedReadPolicies,
+            Set<NetworkPolicy> supportedNetworkPolicies,
+            boolean installationRequired,
+            SandboxEnforcement enforcement) {
+        this(
+                platform,
+                backendName,
+                supportedReadPolicies,
+                supportedNetworkPolicies,
+                Collections.singleton(DeletionPolicy.ALLOW),
+                installationRequired,
+                enforcement);
+    }
+
+    public SandboxCapabilities(
+            SandboxPlatform platform,
+            String backendName,
+            Set<ReadPolicy> supportedReadPolicies,
+            Set<NetworkPolicy> supportedNetworkPolicies,
+            Set<DeletionPolicy> supportedDeletionPolicies,
+            boolean installationRequired,
+            SandboxEnforcement enforcement) {
         this.platform = Objects.requireNonNull(platform, "platform");
         if (backendName == null || io.github.sandboxdemo.core.Java8.isBlank(backendName)) {
             throw new IllegalArgumentException("backendName must not be blank");
@@ -29,7 +66,10 @@ public final class SandboxCapabilities {
                 Collections.unmodifiableSet(new LinkedHashSet<>(supportedReadPolicies));
         this.supportedNetworkPolicies =
                 Collections.unmodifiableSet(new LinkedHashSet<>(supportedNetworkPolicies));
+        this.supportedDeletionPolicies =
+                Collections.unmodifiableSet(new LinkedHashSet<>(supportedDeletionPolicies));
         this.installationRequired = installationRequired;
+        this.enforcement = Objects.requireNonNull(enforcement, "enforcement");
     }
 
     public SandboxPlatform platform() {
@@ -48,8 +88,17 @@ public final class SandboxCapabilities {
         return supportedNetworkPolicies;
     }
 
+    public Set<DeletionPolicy> supportedDeletionPolicies() {
+        return supportedDeletionPolicies;
+    }
+
     public boolean installationRequired() {
         return installationRequired;
+    }
+
+    /** Returns whether the backend has documented enforcement gaps on this host platform. */
+    public SandboxEnforcement enforcement() {
+        return enforcement;
     }
 
     /** Whether this backend can enforce the requested read policy. */
@@ -60,6 +109,11 @@ public final class SandboxCapabilities {
     /** Whether this backend can enforce the requested network policy. */
     public boolean supports(NetworkPolicy policy) {
         return supportedNetworkPolicies.contains(Objects.requireNonNull(policy, "policy"));
+    }
+
+    /** Whether this backend can enforce the requested deletion policy. */
+    public boolean supports(DeletionPolicy policy) {
+        return supportedDeletionPolicies.contains(Objects.requireNonNull(policy, "policy"));
     }
 
     @Override
@@ -75,7 +129,9 @@ public final class SandboxCapabilities {
                 && platform == that.platform
                 && backendName.equals(that.backendName)
                 && supportedReadPolicies.equals(that.supportedReadPolicies)
-                && supportedNetworkPolicies.equals(that.supportedNetworkPolicies);
+                && supportedNetworkPolicies.equals(that.supportedNetworkPolicies)
+                && supportedDeletionPolicies.equals(that.supportedDeletionPolicies)
+                && enforcement == that.enforcement;
     }
 
     @Override
@@ -85,7 +141,9 @@ public final class SandboxCapabilities {
                 backendName,
                 supportedReadPolicies,
                 supportedNetworkPolicies,
-                installationRequired);
+                supportedDeletionPolicies,
+                installationRequired,
+                enforcement);
     }
 
     @Override
@@ -98,8 +156,12 @@ public final class SandboxCapabilities {
                 + supportedReadPolicies
                 + ", supportedNetworkPolicies="
                 + supportedNetworkPolicies
+                + ", supportedDeletionPolicies="
+                + supportedDeletionPolicies
                 + ", installationRequired="
                 + installationRequired
+                + ", enforcement="
+                + enforcement
                 + "]";
     }
 }

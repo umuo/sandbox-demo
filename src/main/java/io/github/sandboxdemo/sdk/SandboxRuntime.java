@@ -1,13 +1,16 @@
 package io.github.sandboxdemo.sdk;
 
+import io.github.sandboxdemo.api.DeletionPolicy;
 import io.github.sandboxdemo.api.NetworkPolicy;
 import io.github.sandboxdemo.api.ReadPolicy;
 import io.github.sandboxdemo.api.SandboxCapabilities;
+import io.github.sandboxdemo.api.SandboxEnforcement;
 import io.github.sandboxdemo.api.SandboxException;
 import io.github.sandboxdemo.api.SandboxPlatform;
 import io.github.sandboxdemo.api.SandboxRuntimeStatus;
 import io.github.sandboxdemo.platform.linux.LinuxBubblewrapSandboxRunner;
 import io.github.sandboxdemo.platform.macos.MacOsSeatbeltSandboxRunner;
+import io.github.sandboxdemo.platform.windows.WindowsRestrictedTokenSandboxRunner;
 import io.github.sandboxdemo.platform.windows.WindowsSandboxSetup;
 import java.nio.file.Path;
 import java.util.Set;
@@ -17,17 +20,17 @@ public final class SandboxRuntime {
 
     private SandboxRuntime() {}
 
-    /** Returns the default Windows runtime home. */
+    /** Returns the runtime home used only by the optional dedicated-account Windows backend. */
     public static Path defaultWindowsHome() {
         return WindowsSandboxSetup.defaultHome();
     }
 
-    /** Installs or upgrades the Windows runtime. The calling process must be elevated. */
+    /** Installs or upgrades the optional Windows runtime. The calling process must be elevated. */
     public static void installWindows(Path home) throws SandboxException, InterruptedException {
         WindowsSandboxSetup.install(home);
     }
 
-    /** Removes a matching Windows runtime. The calling process must be elevated. */
+    /** Removes a matching optional Windows runtime. The calling process must be elevated. */
     public static void uninstallWindows(Path home) throws SandboxException, InterruptedException {
         WindowsSandboxSetup.uninstall(home);
     }
@@ -46,7 +49,7 @@ public final class SandboxRuntime {
     /** Performs a non-persistent readiness probe for the current platform. */
     public static SandboxRuntimeStatus status() {
         SandboxPlatform platform = SandboxPlatform.current();
-        return status(platform, defaultWindowsHome(), defaultBackendName(platform));
+        return status(platform, null, defaultBackendName(platform));
     }
 
     static SandboxCapabilities capabilities(SandboxPlatform platform, String backendName) {
@@ -55,12 +58,29 @@ public final class SandboxRuntime {
                         ? io.github.sandboxdemo.core.Java8.setOf(ReadPolicy.HOST)
                         : io.github.sandboxdemo.core.Java8.setOf(
                                 ReadPolicy.DECLARED_ONLY, ReadPolicy.HOST);
+        boolean setupWindowsBackend =
+                platform == SandboxPlatform.WINDOWS
+                        && "windows-dedicated-user-restricted-token".equals(backendName);
+        Set<NetworkPolicy> networkPolicies =
+                platform == SandboxPlatform.WINDOWS && !setupWindowsBackend
+                        ? io.github.sandboxdemo.core.Java8.setOf(NetworkPolicy.ALLOW)
+                        : io.github.sandboxdemo.core.Java8.setOf(
+                                NetworkPolicy.ALLOW, NetworkPolicy.DENY);
+        Set<DeletionPolicy> deletionPolicies =
+                platform == SandboxPlatform.WINDOWS
+                        ? io.github.sandboxdemo.core.Java8.setOf(
+                                DeletionPolicy.ALLOW, DeletionPolicy.DENY)
+                        : io.github.sandboxdemo.core.Java8.setOf(DeletionPolicy.ALLOW);
         return new SandboxCapabilities(
                 platform,
                 backendName,
                 readPolicies,
-                io.github.sandboxdemo.core.Java8.setOf(NetworkPolicy.ALLOW, NetworkPolicy.DENY),
-                platform == SandboxPlatform.WINDOWS);
+                networkPolicies,
+                deletionPolicies,
+                setupWindowsBackend,
+                platform == SandboxPlatform.WINDOWS
+                        ? SandboxEnforcement.PARTIAL
+                        : SandboxEnforcement.FULL);
     }
 
     static SandboxRuntimeStatus status(
@@ -69,8 +89,17 @@ public final class SandboxRuntime {
         try {
             switch (platform) {
                 case WINDOWS:
-                    WindowsSandboxSetup.verify(windowsHome);
-                    return new SandboxRuntimeStatus(capabilities, true, "Windows runtime verified");
+                    if ("windows-dedicated-user-restricted-token".equals(backendName)) {
+                        if (windowsHome == null) {
+                            throw new IllegalArgumentException(
+                                    "dedicated-account Windows backend requires a runtime home");
+                        }
+                        WindowsSandboxSetup.verify(windowsHome);
+                        return new SandboxRuntimeStatus(
+                                capabilities, true, "Windows production runtime verified");
+                    }
+                    return new SandboxRuntimeStatus(
+                            capabilities, true, WindowsRestrictedTokenSandboxRunner.probeBackend());
                 case LINUX:
                     return new SandboxRuntimeStatus(
                             capabilities, true, LinuxBubblewrapSandboxRunner.probeBackend());
@@ -97,7 +126,7 @@ public final class SandboxRuntime {
     private static String defaultBackendName(SandboxPlatform platform) {
         switch (platform) {
             case WINDOWS:
-                return "windows-dedicated-user-restricted-token";
+                return "windows-restricted-token";
             case LINUX:
                 return "linux-bubblewrap";
             case MACOS:

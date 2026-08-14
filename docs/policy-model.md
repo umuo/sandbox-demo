@@ -49,7 +49,7 @@ SandboxRequest.builder(project, executable)
         .build();
 ```
 
-`readOnlyWorkingDirectory()` 只撤销 Builder 自动添加的“项目根可写”，不会移除项目根的读取声明。
+`readOnlyWorkingDirectory()` 只撤销 Builder 自动添加的“项目根可写”，不会移除项目根的读取声明。此后可以添加更窄的 writable root；如果不添加，业务路径全部只读，只有 SDK 管理的每次执行私有临时目录可写。
 
 ### readableRoots
 
@@ -57,13 +57,15 @@ SandboxRequest.builder(project, executable)
 
 - Linux/macOS `DECLARED_ONLY`：只有系统最小运行时和声明路径可读；
 - `HOST`：宿主可见文件广泛可读；
-- Windows：当前只支持 `HOST`，readable roots 用于给专用账户补充 RX ACL，不构成完整读取白名单。
+- Windows：当前只支持 `HOST`；默认后端沿用当前用户的读取 ACL，readable roots 不构成读取白名单。可选专用账户后端会为声明根补充 RX ACL。
 
 ### writableRoots
 
-允许创建、修改和删除文件的根目录。每个 writable root 也自动成为 readable root。
+允许写入文件的根目录。默认 `DeletionPolicy.ALLOW` 允许创建、修改、删除和重命名；在
+Windows 上选择 `DeletionPolicy.DENY` 后，只保留创建和原地修改，删除及依赖删除权限的
+重命名会被拒绝。每个 writable root 也自动成为 readable root。
 
-策略至少需要一个 writable root。SDK 私有临时目录会在校验后作为内部 writable root 加入，但它不替代调用者明确的数据输出路径。
+策略可以不包含调用者声明的 writable root，以表达真正的只读工作区。SDK 私有临时目录会在校验后作为内部 writable root 加入，供临时文件和工具缓存使用，但其中内容在执行结束后清理，不能作为业务输出路径。
 
 ### protectedPaths
 
@@ -93,7 +95,7 @@ Linux 用只读 bind mount 覆盖，macOS 发出 `deny file-write*`，Windows �
 
 ### `ReadPolicy.DECLARED_ONLY`
 
-目标是最小可见性：系统运行时 + readable roots + writable roots。Linux 和 macOS 支持；Windows 生产后端会失败关闭。
+目标是最小可见性：系统运行时 + readable roots + writable roots。Linux 和 macOS 支持；Windows 后端会失败关闭。
 
 ### `ReadPolicy.HOST`
 
@@ -106,7 +108,7 @@ Linux 用只读 bind mount 覆盖，macOS 发出 `deny file-write*`，Windows �
 
 ### `NetworkPolicy.DENY`
 
-- Windows：使用有入站/出站 SID-scoped block rules 的 offline account；
+- Windows 默认后端不支持；显式安装并选择专用账户后端后，使用有入站/出站 SID-scoped block rules 的 offline account；
 - Linux：seccomp 拒绝 `socket`、`socketpair` 与 `io_uring_setup`；
 - macOS：不向 Seatbelt profile 添加 network allow rule。
 
@@ -114,11 +116,27 @@ Linux 用只读 bind mount 覆盖，macOS 发出 `deny file-write*`，Windows �
 
 表示 SDK 不阻止常规 IP 网络：
 
-- Windows 选择 online account；
+- Windows 默认后端不添加网络策略；可选专用账户后端选择 online account；
 - Linux 不执行 `--unshare-net`，但仍阻止宿主 Unix-domain socket；
 - macOS 允许 inbound、outbound 和 system socket。
 
 ALLOW 不会绕过宿主 Firewall、企业策略、路由、TLS 或应用认证。
+
+## 删除策略
+
+### `DeletionPolicy.ALLOW`
+
+默认值。writable roots 内允许创建、修改、删除和重命名。
+
+### `DeletionPolicy.DENY`
+
+当前由 Windows 后端强制执行。SDK 给随机 capability SID 授予不包含 `DELETE` 的写权限，
+并显式拒绝 `DELETE | FILE_DELETE_CHILD`，因此仍可新建或原地覆盖文件，但 `DeleteFile`、
+`Remove-Item`、目录删除和通常的重命名会失败。Linux 的 bind mount 不能把“创建”与
+“删除”拆开，macOS 后端当前也不声明该能力；两者会在运行命令前失败关闭。
+
+此策略不阻止清空或覆盖文件内容，因为那属于修改。Windows 后端整体仍为 `PARTIAL`：
+Everyone 可写对象与预置 hard link 等限制继续适用，不能把该模式解释成 VM 级边界。
 
 ## 环境变量
 
@@ -152,11 +170,15 @@ stdout 和 stderr 各自的最大捕获大小，默认 4 MiB，API 上限 64 MiB
 | `HOST` | 支持 | 支持 | 支持 |
 | 多 writable roots | 支持 | 支持 | 支持 |
 | protected paths | 支持 | 支持 | 支持 |
-| network deny | Firewall | seccomp socket deny | Seatbelt |
-| network allow | online account | IP 网络；Unix socket 仍阻止 | Seatbelt allow |
+| deletion deny | 支持 | 不支持 | 不支持 |
+| network deny | 默认不支持；可选 Firewall 后端 | seccomp socket deny | Seatbelt |
+| network allow | 默认，不修改 Firewall | IP 网络；Unix socket 仍阻止 | Seatbelt allow |
 | 强进程树容器 | Job Object | PID namespace | 无等价 Job Object |
+| `SandboxEnforcement` | `PARTIAL` | `FULL` | `FULL` |
 
-调用前可以通过 `SandboxClient.capabilities()` 协商能力，不要根据操作系统名称猜测。
+调用前可以通过 `SandboxClient.capabilities()` 协商能力，不要根据操作系统名称猜测。`enforcement()` 明确区分完整执行与带已知平台缺口的执行；Windows 因 Everyone 可写对象和 hard-link 限制返回 `PARTIAL`。`SandboxClient.execute(...)` 也会在调用后端前统一校验 read/network/deletion policy；不支持的组合失败关闭，自定义后端不会收到请求。
+
+Builder 默认值按平台解析：Windows 使用 `ReadPolicy.HOST + NetworkPolicy.ALLOW`，Linux/macOS 使用 `ReadPolicy.DECLARED_ONLY + NetworkPolicy.DENY`。因此默认 Windows 请求不需要额外网络、账户或安装配置。
 
 ## Windows 选择性写入示例
 
@@ -172,8 +194,9 @@ SandboxRequest request = SandboxRequest.builder(project, powershell)
         .writableRoot(tests)
         .readPolicy(ReadPolicy.HOST)
         .network(NetworkPolicy.ALLOW)
+        .deletion(DeletionPolicy.DENY)
         .timeout(Duration.ofMinutes(2))
         .build();
 ```
 
-这个请求准确保证的是“项目根不可写、`src/test/java` 可写”。它不能保证 Windows 上只有 project 和 AppData 可读。
+这个请求准确表达的是“项目根不可写、`src/test/java` 可创建和原地修改但不可删除或重命名”。它不能保证 Windows 上只有 project 和 AppData 可读。

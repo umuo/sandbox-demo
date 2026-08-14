@@ -12,7 +12,7 @@
 
 | 平台 | 文件系统边界 | 网络边界 | 进程树边界 | 严格读取白名单 |
 |---|---|---|---|---|
-| Windows | 专用低权限账户、NTFS ACL、Capability SID、`WRITE_RESTRICTED` Token | online/offline 账户与 Windows Firewall | 双层 Job Object | 否；当前实现只支持 `ReadPolicy.HOST` |
+| Windows | 当前普通用户、NTFS ACL、Capability SID、`WRITE_RESTRICTED` Token | 默认不限制；可选专用账户 Firewall 后端 | Job Object | 否；当前实现只支持 `ReadPolicy.HOST` |
 | Linux / WSL2 | bubblewrap mount namespace、只读/可写 bind mount | seccomp socket policy | PID namespace、bubblewrap PID 1、`--die-with-parent` | 是 |
 | macOS | Seatbelt / SBPL deny-default profile | Seatbelt network rules | Seatbelt 继承、Java 监督与超时回收 | 是 |
 
@@ -27,7 +27,7 @@ flowchart TD
     B --> C["路径规范化与策略校验"]
     C --> D["环境变量 allowlist"]
     D --> E{"操作系统"}
-    E -->|Windows| F["账户 + ACL + Restricted Token"]
+    E -->|Windows| F["ACL + Restricted Token"]
     E -->|Linux| G["bubblewrap + namespaces + seccomp"]
     E -->|macOS| H["Seatbelt profile"]
     F --> I["目标进程及全部后代"]
@@ -52,7 +52,7 @@ SandboxRequest request = SandboxRequest.builder(workspace, "/bin/sh")
 SandboxResult result = SandboxClient.create().execute(request);
 ```
 
-Windows 必须显式使用 `ReadPolicy.HOST`。完整 API 用法见 [SDK 集成](SDK.md)，权限字段的准确语义见 [策略模型](policy-model.md)。
+Windows Builder 自动使用 `ReadPolicy.HOST + NetworkPolicy.ALLOW`，默认不需要 setup、账户或 Firewall 配置。完整 API 用法见 [SDK 集成](SDK.md)，权限字段的准确语义见 [策略模型](policy-model.md)。
 
 ## 阅读路线
 

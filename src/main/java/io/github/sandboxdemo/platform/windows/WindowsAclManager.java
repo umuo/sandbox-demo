@@ -6,6 +6,7 @@ import static io.github.sandboxdemo.platform.windows.WindowsNative.Kernel32;
 import com.sun.jna.Pointer;
 import com.sun.jna.WString;
 import com.sun.jna.ptr.PointerByReference;
+import io.github.sandboxdemo.api.DeletionPolicy;
 import io.github.sandboxdemo.api.SandboxException;
 import io.github.sandboxdemo.core.ValidatedPolicy;
 import java.nio.file.Path;
@@ -39,8 +40,11 @@ final class WindowsAclManager {
     private static final int FILE_GENERIC_EXECUTE = 0x001200A0;
 
     private static final int READ_EXECUTE = FILE_GENERIC_READ | FILE_GENERIC_EXECUTE;
-    private static final int MODIFY =
+    private static final int WRITE_WITH_DELETE =
             FILE_GENERIC_READ | FILE_GENERIC_WRITE | FILE_GENERIC_EXECUTE | DELETE;
+    private static final int WRITE_WITHOUT_DELETE =
+            FILE_GENERIC_READ | FILE_GENERIC_WRITE | FILE_GENERIC_EXECUTE;
+    private static final int DENY_DELETE = DELETE | FILE_DELETE_CHILD;
     // Exclude READ_CONTROL and SYNCHRONIZE, which overlap FILE_GENERIC_READ/EXECUTE. Denying the
     // whole FILE_GENERIC_WRITE mask would unintentionally make the protected subtree unreadable.
     private static final int DENY_WRITE =
@@ -90,13 +94,23 @@ final class WindowsAclManager {
             }
             for (Path writableRoot : policy.writableRoots()) {
                 String capabilitySid = WindowsCapabilitySid.random();
-                grant(writableRoot, capabilitySid, MODIFY);
+                int writeRights =
+                        policy.deletionPolicy() == DeletionPolicy.DENY
+                                ? WRITE_WITHOUT_DELETE
+                                : WRITE_WITH_DELETE;
+                grant(writableRoot, capabilitySid, writeRights);
                 applied.add(AclMutation.grant(writableRoot, capabilitySid));
+                if (policy.deletionPolicy() == DeletionPolicy.DENY) {
+                    // An explicit deny is required because compatibility restricting SIDs such as
+                    // Everyone may otherwise receive deletion rights from the original DACL.
+                    deny(writableRoot, capabilitySid, DENY_DELETE);
+                    applied.add(AclMutation.deny(writableRoot, capabilitySid));
+                }
                 capabilitySids.add(capabilitySid);
 
                 for (String userSid : sandboxUserSids) {
                     recordPersistentGrant(writableRoot, userSid);
-                    grant(writableRoot, userSid, MODIFY);
+                    grant(writableRoot, userSid, writeRights);
                 }
             }
 
@@ -142,6 +156,14 @@ final class WindowsAclManager {
 
     static int denyWriteMaskForTest() {
         return DENY_WRITE;
+    }
+
+    static int writeWithoutDeleteMaskForTest() {
+        return WRITE_WITHOUT_DELETE;
+    }
+
+    static int denyDeleteMaskForTest() {
+        return DENY_DELETE;
     }
 
     private void rollback(List<AclMutation> mutations) {

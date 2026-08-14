@@ -43,4 +43,25 @@ class MacOsSeatbeltProfileTest {
             PathPolicyValidator.cleanup(policy);
         }
     }
+
+    @Test
+    void readOnlyWorkingDirectoryGrantsWritesOnlyToPrivateTemp() throws Exception {
+        ValidatedPolicy policy =
+                PathPolicyValidator.validate(
+                        SandboxPolicy.builder(workspace).readOnlyWorkingDirectory().build());
+        try {
+            MacOsSeatbeltProfile.GeneratedProfile generated = MacOsSeatbeltProfile.generate(policy);
+            java.util.List<String> writableDefinitions =
+                    generated.definitions().stream()
+                            .filter(definition -> definition.startsWith("-DWRITABLE_"))
+                            .collect(java.util.stream.Collectors.toList());
+
+            assertTrue(writableDefinitions.size() == 1);
+            assertTrue(
+                    writableDefinitions.get(0).endsWith(policy.privateTempDirectory().toString()));
+            assertFalse(writableDefinitions.get(0).endsWith(workspace.toRealPath().toString()));
+        } finally {
+            PathPolicyValidator.cleanup(policy);
+        }
+    }
 }

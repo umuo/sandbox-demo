@@ -1,5 +1,6 @@
 package io.github.sandboxdemo.platform.windows;
 
+import io.github.sandboxdemo.api.DeletionPolicy;
 import io.github.sandboxdemo.api.NetworkPolicy;
 import io.github.sandboxdemo.api.ReadPolicy;
 import io.github.sandboxdemo.api.SandboxException;
@@ -25,7 +26,7 @@ final class WindowsWorkerProtocol {
 
     private static final int REQUEST_MAGIC = 0x53425851;
     private static final int RESULT_MAGIC = 0x53425852;
-    private static final int VERSION = 3;
+    private static final int VERSION = 4;
     private static final int MAX_STRING_BYTES = 1024 * 1024;
     private static final int MAX_BINARY_BYTES = 64 * 1024 * 1024;
     private static final int MAX_STANDARD_INPUT_BYTES = 8 * 1024 * 1024;
@@ -51,6 +52,7 @@ final class WindowsWorkerProtocol {
             writeString(output, request.policy().privateTempDirectory().toString());
             output.writeInt(request.policy().networkPolicy().ordinal());
             output.writeInt(request.policy().readPolicy().ordinal());
+            output.writeInt(request.policy().deletionPolicy().ordinal());
             output.writeLong(request.policy().timeout().toMillis());
             output.writeInt(request.policy().maxOutputBytes());
             output.writeBoolean(request.policy().allowPathSearch());
@@ -82,6 +84,10 @@ final class WindowsWorkerProtocol {
             if (readOrdinal < 0 || readOrdinal >= ReadPolicy.values().length) {
                 throw new SandboxException("invalid read policy in Windows worker request");
             }
+            int deletionOrdinal = input.readInt();
+            if (deletionOrdinal < 0 || deletionOrdinal >= DeletionPolicy.values().length) {
+                throw new SandboxException("invalid deletion policy in Windows worker request");
+            }
             long timeoutMillis = input.readLong();
             int maxOutputBytes = input.readInt();
             boolean allowPathSearch = input.readBoolean();
@@ -102,6 +108,7 @@ final class WindowsWorkerProtocol {
                             temp,
                             NetworkPolicy.values()[networkOrdinal],
                             ReadPolicy.values()[readOrdinal],
+                            DeletionPolicy.values()[deletionOrdinal],
                             Duration.ofMillis(timeoutMillis),
                             maxOutputBytes,
                             allowPathSearch);

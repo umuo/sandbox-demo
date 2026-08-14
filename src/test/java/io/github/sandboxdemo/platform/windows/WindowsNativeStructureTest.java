@@ -91,4 +91,12 @@ class WindowsNativeStructureTest {
                 WindowsAclManager.readExecuteMaskForTest()
                         & WindowsAclManager.denyWriteMaskForTest());
     }
+
+    @Test
+    void createAndModifyMaskDoesNotContainDeniedDeleteRights() {
+        assertEquals(
+                0,
+                WindowsAclManager.writeWithoutDeleteMaskForTest()
+                        & WindowsAclManager.denyDeleteMaskForTest());
+    }
 }

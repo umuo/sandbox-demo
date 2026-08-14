@@ -1,8 +1,10 @@
 package io.github.sandboxdemo.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Path;
 import java.time.Duration;
@@ -67,5 +69,22 @@ class SandboxRequestBuilderTest {
                         SandboxRequest.builder(workspace, "/bin/true")
                                 .standardInput(new byte[8 * 1024 * 1024 + 1])
                                 .build());
+    }
+
+    @Test
+    void toStringDoesNotExposeEnvironmentValuesOrStandardInput() {
+        Path workspace =
+                java.nio.file.Paths.get("target", "sdk-builder-workspace").toAbsolutePath();
+        SandboxRequest request =
+                SandboxRequest.builder(workspace, "/bin/true")
+                        .environment("ACCESS_TOKEN", "secret-environment-value")
+                        .standardInputUtf8("secret-standard-input")
+                        .build();
+
+        String rendered = request.toString();
+        assertTrue(rendered.contains("ACCESS_TOKEN"));
+        assertTrue(rendered.contains("standardInputBytes=21"));
+        assertFalse(rendered.contains("secret-environment-value"));
+        assertFalse(rendered.contains("secret-standard-input"));
     }
 }

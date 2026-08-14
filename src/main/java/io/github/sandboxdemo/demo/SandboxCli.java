@@ -1,6 +1,7 @@
 package io.github.sandboxdemo.demo;
 
 import io.github.sandboxdemo.api.CommandSpec;
+import io.github.sandboxdemo.api.DeletionPolicy;
 import io.github.sandboxdemo.api.NetworkPolicy;
 import io.github.sandboxdemo.api.ReadPolicy;
 import io.github.sandboxdemo.api.SandboxPolicy;
@@ -33,13 +34,15 @@ public final class SandboxCli {
                                         ? java.nio.file.Paths.get(args[1])
                                         : java.nio.file.Paths.get(".sandbox-demo"));
             } else if ("status".equals(args[0])) {
-                SandboxRuntimeStatus status =
-                        SandboxClient.builder()
-                                .windowsHome(parseWindowsHome(args))
-                                .build()
-                                .status();
+                SandboxClient.Builder client = SandboxClient.builder();
+                Path productionHome = parseOptionalWindowsHome(args);
+                if (productionHome != null) {
+                    client.windowsProductionHome(productionHome);
+                }
+                SandboxRuntimeStatus status = client.build().status();
                 System.out.println("backend    : " + status.capabilities().backendName());
                 System.out.println("platform   : " + status.capabilities().platform());
+                System.out.println("enforcement: " + status.capabilities().enforcement());
                 System.out.println("ready      : " + status.ready());
                 System.out.println("diagnostic : " + status.diagnostic());
                 exitCode = status.ready() ? 0 : 3;
@@ -77,11 +80,13 @@ public final class SandboxCli {
         List<Path> writable = new ArrayList<>();
         List<Path> protectedPaths = new ArrayList<>();
         Map<String, String> environment = new LinkedHashMap<>();
-        NetworkPolicy network = NetworkPolicy.DENY;
-        ReadPolicy readPolicy = ReadPolicy.DECLARED_ONLY;
+        NetworkPolicy network = null;
+        ReadPolicy readPolicy = null;
+        DeletionPolicy deletionPolicy = null;
         Duration timeout = Duration.ofSeconds(30);
         int maxOutputBytes = 4 * 1024 * 1024;
         boolean allowPathSearch = false;
+        boolean readOnlyWorkingDirectory = false;
         int separator = -1;
 
         for (int i = 1; i < args.length; i++) {
@@ -99,6 +104,9 @@ public final class SandboxCli {
                 case "--writable":
                     writable.add(java.nio.file.Paths.get(requireValue(args, ++i, "--writable")));
                     break;
+                case "--read-only-cwd":
+                    readOnlyWorkingDirectory = true;
+                    break;
                 case "--protect":
                     protectedPaths.add(
                             java.nio.file.Paths.get(requireValue(args, ++i, "--protect")));
@@ -108,6 +116,9 @@ public final class SandboxCli {
                     break;
                 case "--read-policy":
                     readPolicy = parseReadPolicy(requireValue(args, ++i, "--read-policy"));
+                    break;
+                case "--deletion":
+                    deletionPolicy = parseDeletion(requireValue(args, ++i, "--deletion"));
                     break;
                 case "--timeout":
                     timeout =
@@ -134,11 +145,21 @@ public final class SandboxCli {
 
         SandboxPolicy.Builder policy =
                 SandboxPolicy.builder(cwd)
-                        .network(network)
-                        .readPolicy(readPolicy)
                         .timeout(timeout)
                         .maxOutputBytes(maxOutputBytes)
                         .allowPathSearch(allowPathSearch);
+        if (network != null) {
+            policy.network(network);
+        }
+        if (readPolicy != null) {
+            policy.readPolicy(readPolicy);
+        }
+        if (deletionPolicy != null) {
+            policy.deletion(deletionPolicy);
+        }
+        if (readOnlyWorkingDirectory) {
+            policy.readOnlyWorkingDirectory();
+        }
         readable.forEach(policy::readableRoot);
         writable.forEach(policy::writableRoot);
         protectedPaths.forEach(policy::protect);
@@ -175,11 +196,15 @@ public final class SandboxCli {
         io.github.sandboxdemo.core.Java8.writeString(
                 outsideSecret, "host-secret-must-not-be-readable");
 
-        NetworkPolicy network = NetworkPolicy.DENY;
         ReadPolicy readPolicy =
                 OperatingSystem.current() == OperatingSystem.WINDOWS
                         ? ReadPolicy.HOST
                         : ReadPolicy.DECLARED_ONLY;
+        SandboxClient runner = SandboxClient.create();
+        NetworkPolicy network =
+                runner.capabilities().supports(NetworkPolicy.DENY)
+                        ? NetworkPolicy.DENY
+                        : NetworkPolicy.ALLOW;
         SandboxPolicy policy =
                 SandboxPolicy.builder(workspace)
                         .protect(protectedDirectory)
@@ -187,8 +212,6 @@ public final class SandboxCli {
                         .readPolicy(readPolicy)
                         .timeout(Duration.ofSeconds(10))
                         .build();
-        SandboxClient runner = SandboxClient.create();
-
         System.out.println("backend   : " + runner.backendName());
         System.out.println("workspace : " + workspace);
         System.out.println("outside   : " + outside);
@@ -300,6 +323,17 @@ public final class SandboxCli {
         throw new IllegalArgumentException("read-policy must be declared-only or host");
     }
 
+    private static DeletionPolicy parseDeletion(String value) {
+        String normalized = value.toLowerCase();
+        if ("allow".equals(normalized)) {
+            return DeletionPolicy.ALLOW;
+        }
+        if ("deny".equals(normalized)) {
+            return DeletionPolicy.DENY;
+        }
+        throw new IllegalArgumentException("deletion must be allow or deny");
+    }
+
     private static void addEnvironment(Map<String, String> environment, String assignment) {
         int equals = assignment.indexOf('=');
         if (equals <= 0) {
@@ -318,6 +352,16 @@ public final class SandboxCli {
         throw new IllegalArgumentException(args[0] + " accepts only optional --home PATH");
     }
 
+    private static Path parseOptionalWindowsHome(String[] args) {
+        if (args.length == 1) {
+            return null;
+        }
+        if (args.length == 3 && "--home".equals(args[1])) {
+            return java.nio.file.Paths.get(args[2]);
+        }
+        throw new IllegalArgumentException("status accepts only optional --home PATH");
+    }
+
     private static void printUsage() {
         System.err.println(
                 io.github.sandboxdemo.core.Java8.lines(
@@ -329,11 +373,13 @@ public final class SandboxCli {
                         "  java -jar sandbox.jar run --cwd PATH [options] -- EXECUTABLE [ARG...]",
                         "",
                         "Options:",
+                        "  --read-only-cwd    remove the implicit write grant for --cwd",
                         "  --writable PATH     add a writable root (repeatable)",
                         "  --readable PATH     add a read-only root (repeatable)",
                         "  --protect PATH      make a nested path read-only (repeatable)",
                         "  --read-policy declared-only|host",
                         "  --network allow|deny",
+                        "  --deletion allow|deny",
                         "  --timeout MILLIS",
                         "  --max-output-bytes BYTES",
                         "  --allow-path-search explicitly permit resolving outer argv[0] through PATH",

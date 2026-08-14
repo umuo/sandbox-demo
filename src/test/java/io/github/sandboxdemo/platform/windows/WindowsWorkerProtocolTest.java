@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import io.github.sandboxdemo.api.DeletionPolicy;
 import io.github.sandboxdemo.api.NetworkPolicy;
 import io.github.sandboxdemo.api.ReadPolicy;
 import io.github.sandboxdemo.api.SandboxException;
@@ -33,6 +34,7 @@ class WindowsWorkerProtocolTest {
                                 .readableRoot(readable)
                                 .readPolicy(ReadPolicy.HOST)
                                 .network(NetworkPolicy.DENY)
+                                .deletion(DeletionPolicy.DENY)
                                 .timeout(Duration.ofSeconds(3))
                                 .build());
         try {
@@ -55,6 +57,7 @@ class WindowsWorkerProtocolTest {
             assertArrayEquals(request.standardInput(), decoded.standardInput());
             assertEquals(policy.readableRoots(), decoded.policy().readableRoots());
             assertEquals(policy.readPolicy(), decoded.policy().readPolicy());
+            assertEquals(policy.deletionPolicy(), decoded.policy().deletionPolicy());
 
             Path resultFile = root.resolve("result.bin");
             SandboxResult result =

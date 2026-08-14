@@ -33,7 +33,7 @@ Trusted Computing Base（TCB）包括：
 - 宿主操作系统内核；
 - Java Agent 主进程；
 - 本 SDK 与 JNA；
-- Windows setup/worker runtime；
+- 可选 Windows setup/worker runtime；
 - Linux bubblewrap 二进制；
 - macOS `sandbox-exec` 与生成 profile 的代码；
 - 负责创建 workspace 的服务账户；
@@ -73,7 +73,7 @@ stdin、stdout、stderr 和内部协议都有大小上限，防止简单内存�
 |---|---|---|---|
 | workspace 外禁止写 | 强 | 强 | 强 |
 | declared-only 读取 | 不支持 | mount namespace | Seatbelt |
-| 网络 deny | SID Firewall | seccomp socket deny | Seatbelt |
+| 网络 deny | 默认不提供；可选 SID Firewall | seccomp socket deny | Seatbelt |
 | 后代继承文件策略 | Token/ACL | namespace | Seatbelt |
 | 强制回收进程树 | Job Object | PID namespace | 较弱，Java 监督 |
 | 资源数量限制 | 进程数、Job 内存 | 未内建 cgroup | 未内建 |
@@ -86,7 +86,7 @@ stdin、stdout、stderr 和内部协议都有大小上限，防止简单内存�
 
 ### Windows
 
-当前 `WRITE_RESTRICTED` 设计重点限制写。`ReadPolicy.HOST` 允许专用账户可访问的宿主文件被读取。因此即使只能写 workspace，命令仍可能把读取到的秘密：
+当前 `WRITE_RESTRICTED` 设计重点限制写。`ReadPolicy.HOST` 允许当前用户（或可选专用账户）可访问的宿主文件被读取。因此即使只能写 workspace，命令仍可能把读取到的秘密：
 
 - 打印到 stdout；
 - 写入 workspace；
@@ -232,12 +232,12 @@ VM 中只映射专用 input/workspace/output，不映射用户 home、SSH key、
 ## 上线检查表
 
 - [ ] 使用专用、非管理员 Agent 服务账户。
-- [ ] Windows setup 与日常 run 分离。
+- [ ] Windows 默认后端由普通非 elevated 用户运行；如启用可选后端，setup 与日常 run 分离。
 - [ ] 固定并校验 JDK、JNA、bubblewrap 和 SDK 制品。
 - [ ] writable roots 由服务端生成，不接受模型任意路径。
 - [ ] readable roots 使用服务端 allowlist。
 - [ ] 每任务使用新 workspace，清洗链接和归档文件。
-- [ ] 默认 `NetworkPolicy.DENY`，ALLOW 必须有业务理由。
+- [ ] Windows 默认网络不受 SDK 限制；需要出站控制时使用外部策略、VM 或显式专用账户后端。
 - [ ] 不把 API key 放入显式 environment。
 - [ ] 检查 `stdoutTruncated` / `stderrTruncated` / `timedOut`。
 - [ ] Windows 升级后重新执行 setup。

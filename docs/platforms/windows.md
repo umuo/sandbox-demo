@@ -1,38 +1,35 @@
 # Windows 实现
 
-Windows 是三个平台中生命周期最复杂的后端。当前生产路径不是 AppContainer，也不调用 Codex 二进制，而是由本项目的 Java/JNA 代码组合以下机制：
+Windows 默认使用零配置路径，不是 AppContainer，也不调用 Codex 二进制。普通非 elevated 用户可直接使用：
 
 ```text
-专用本地账户
+当前用户 Access Token
 + NTFS ACL
 + 随机 Capability SID
 + WRITE_RESTRICTED Token
 + Private Desktop
-+ Windows Firewall
 + Job Object
 ```
+
+默认路径不创建本地账户、不安装 worker、不授予 `Log on locally`、不修改 Firewall，也不限制网络。原有专用账户 + Firewall 路径作为显式 opt-in 保留。
 
 ## 总体执行链
 
 ```mermaid
 flowchart TD
-    A["普通权限 Java Agent"] --> B["WindowsProductionSandboxRunner"]
-    B --> C["加载并校验安装元数据"]
-    C --> D{"网络策略"}
-    D -->|DENY| E["AgentSbxOffline"]
-    D -->|ALLOW| F["AgentSbxOnline"]
-    E --> G["应用 ACL 与 Capability SID"]
-    F --> G
-    G --> H["CreateProcessWithLogonW 启动可信 Worker"]
-    H --> I["Worker 校验自身账户 SID"]
-    I --> J["CreateRestrictedToken"]
-    J --> K["CreateProcessAsUserW 创建 suspended child"]
-    K --> L["AssignProcessToJobObject"]
-    L --> M["ResumeThread"]
-    M --> N["PowerShell / CMD / Python / 任意 EXE"]
+    A["普通非 elevated Java Agent"] --> B["WindowsRestrictedTokenSandboxRunner"]
+    B --> C["路径校验 + Capability SID ACL"]
+    C --> D["当前用户 Token → CreateRestrictedToken"]
+    D --> E["CreateProcessAsUserW 创建 suspended child"]
+    E --> F["Private Desktop + Handle allowlist"]
+    F --> G["AssignProcessToJobObject"]
+    G --> H["ResumeThread"]
+    H --> I["PowerShell / CMD / Python / 任意 EXE"]
 ```
 
-## Setup 与 Run 分离
+默认 Builder 自动采用 `ReadPolicy.HOST + NetworkPolicy.ALLOW`。请求 DENY 会在进入后端前失败关闭；需要网络阻断时选择下节的可选后端或 VM。
+
+## 可选专用账户后端：Setup 与 Run 分离
 
 ### Setup 阶段
 
@@ -61,7 +58,7 @@ flowchart TD
 
 Security Identifier，Windows 用来标识用户、组、登录会话或合成安全主体的稳定二进制标识。账户名可以改变，访问检查使用 SID。
 
-本项目涉及三类 SID：
+两个 Windows 后端合计涉及三类 SID：
 
 - 真实 Java Agent 用户 SID；
 - `AgentSbxOffline` / `AgentSbxOnline` 的账户 SID；
@@ -93,7 +90,7 @@ DISABLE_MAX_PRIVILEGE | WRITE_RESTRICTED
 
 让 restricting SID 只参与写访问检查。这是当前 Windows 后端“广泛读取、限制写入”的核心。
 
-生产 token 的 restricting SID 列表包含每次执行生成的 capability SID、专用 sandbox 账户 SID、Everyone SID `S-1-1-0`、当前 logon-session SID，以及 Windows 专门定义的 Write Restricted Code SID `S-1-5-33`。用户 profile 注册表和加密对象通常向账户 SID 授权，`BaseNamedObjects` 等每次登录资源使用 logon-session SID，部分系统初始化和 IPC 对象会向 `S-1-5-33` 授权，而 CLR、Windows PowerShell 等通用 Win32 工具还会访问只向 Everyone 授权的共享系统对象。缺少 Everyone 会让 PowerShell 以 `Starting the CLR failed with HRESULT 80070005` 退出；缺少账户 SID、登录环境或未加载 profile 则可能以 `Loading managed Windows PowerShell failed with error 8009001d` 退出。
+默认 token 的 restricting SID 列表包含每次执行生成的 capability SID、Everyone、当前 logon-session SID 和 Write Restricted Code SID `S-1-5-33`，但明确不包含真实当前用户 SID，否则当前用户本来可写的所有路径都会越过 capability 写边界。可选专用账户 token 还包含其隔离账户 SID，以支持隔离 profile。
 
 这些兼容 SID 仍然需要账户 SID 的第一次访问检查和对象 DACL 中的匹配 ACE。专用账户 SID 让该隔离账户自己的 profile 可写；Everyone 则意味着宿主上本来就向 Everyone 开放写权限的位置仍可写。生产宿主不得在 sandbox 账户 profile 中存放可信数据，也不得把安全敏感目录配置成 world-writable；除此之外，workspace 写边界由随机 capability SID 及 protected-path deny ACE 提供。开发用 `WindowsRestrictedTokenSandboxRunner` 不加入真实宿主 user SID，否则宿主用户可写的 sibling 路径也会通过第二次检查。
 
@@ -101,7 +98,7 @@ DISABLE_MAX_PRIVILEGE | WRITE_RESTRICTED
 
 ### 为什么不使用 `LUA_TOKEN`
 
-`LUA_TOKEN` 用于构造 UAC/Limited User Account 风格的过滤 token，不是通用沙箱限制。生产后端已经使用专用非管理员账户；开发后端和生产后端的写边界都由 `DISABLE_MAX_PRIVILEGE`、restricting SID 与 `WRITE_RESTRICTED` 共同提供，因此这里不启用它。
+`LUA_TOKEN` 用于构造 UAC/Limited User Account 风格的过滤 token，不是通用沙箱限制。默认后端直接拒绝 elevated Agent；可选后端使用专用非管理员账户。两个后端的写边界都由 `DISABLE_MAX_PRIVILEGE`、restricting SID 与 `WRITE_RESTRICTED` 共同提供，因此这里不启用它。
 
 Windows 会对写访问执行两次判断：
 
@@ -120,7 +117,8 @@ flowchart TD
 
 不对应真实登录用户的随机 synthetic SID。它被同时放到：
 
-1. 当前 writable root 的 Allow Modify ACE；
+1. 当前 writable root 的 Allow ACE；默认包含 Modify，`DeletionPolicy.DENY` 时移除
+   `DELETE` 并增加 `DELETE | FILE_DELETE_CHILD` Deny；
 2. 当前 restricted token 的 restricting SID 列表。
 
 这形成一种短期“写能力票据”。旧 workspace 的 capability SID 不会被新请求复用，因此旧 ACL 即使异常残留也没有活跃 token 可以使用。
@@ -140,6 +138,7 @@ flowchart TD
 | readable root | sandbox 用户 SID | `(OI)(CI)(RX)` |
 | writable root | sandbox 用户 SID | `(OI)(CI)(M)` |
 | writable root | 随机 capability SID | `(OI)(CI)(M)` |
+| no-delete writable root | 随机 capability SID | Create/Write Allow + `(OI)(CI)(D,DC)` Deny |
 | protected path | capability SID | `(OI)(CI)(W,D)` Deny |
 
 其中：
@@ -161,7 +160,7 @@ D:\project                    RX
 D:\project\src\test\java     M
 ```
 
-普通 sandbox 用户可能由于继承或宿主 ACL 对项目有更宽权限，但 restricted token 的 restricting SID 只在 `src\test\java` 拥有 Modify ACE。因此：
+当前普通用户（或可选专用账户）可能由于继承或宿主 ACL 对项目有更宽权限，但 restricted token 的 capability SID 只在 `src\test\java` 拥有 Modify ACE。因此：
 
 - 写 `D:\project\README.md`：第二次检查失败；
 - 写 `D:\project\src\test\java\DemoTest.java`：两个检查都成功。
@@ -179,7 +178,7 @@ SandboxRequest request = SandboxRequest.builder(project, powershell)
         .build();
 ```
 
-## Worker 两阶段启动
+## 可选专用账户后端的 Worker 两阶段启动
 
 ### `CreateProcessWithLogonW`
 
@@ -242,6 +241,8 @@ Windows 的文件系统重解析机制，junction、symbolic link 和某些云�
 这不能自动解决 writable root 内预先存在的 hard link 风险，上传或解压工作区仍需单独清洗链接。
 
 ## 网络账户与 Firewall
+
+默认后端始终使用 `NetworkPolicy.ALLOW`，不会创建 Firewall 规则。以下账户与规则只属于显式安装的专用账户后端。
 
 ### Offline account
 

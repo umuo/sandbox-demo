@@ -62,7 +62,7 @@ Trusted Computing Base，可信计算基。所有能破坏安全保证的可信�
 
 ### Readable root
 
-允许读取的路径根。在 Windows 它只确保专用账户能读，不形成完整读取 allowlist。
+允许读取的路径根。在 Windows 默认后端中它不缩小当前用户已有的读取权限；可选专用账户后端用它补充读取权限，但仍不形成完整读取 allowlist。
 
 ### Writable root
 
@@ -116,7 +116,7 @@ Strategy 接口。平台实现负责把统一策略翻译成原生沙箱。
 
 ### `SandboxPolicy`
 
-不可变权限策略：路径、读取模式、网络、timeout、输出上限和 PATH 搜索选项。
+不可变权限策略：路径、读取模式、网络、删除策略、timeout、输出上限和 PATH 搜索选项。
 
 ### `CommandSpec`
 
@@ -128,11 +128,11 @@ executable + arguments 的值对象，不隐式插入 Shell。
 
 ### `SandboxCapabilities`
 
-当前后端支持的读取和网络策略。用于能力协商，不应只看 OS 名称猜测。
+当前后端支持的读取、网络和删除策略。用于能力协商，不应只看 OS 名称猜测。
 
 ### `SandboxBackendUnavailableException`
 
-平台能力缺失或策略无法安全执行，例如没有 bwrap、不能嵌套 Seatbelt、Windows 未 setup。
+平台能力缺失或策略无法安全执行，例如没有 bwrap、不能嵌套 Seatbelt、默认 Windows 后端从 elevated 进程启动，或可选 Windows 后端未 setup。
 
 ### `PathPolicyValidator`
 

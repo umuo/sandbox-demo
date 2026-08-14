@@ -16,17 +16,12 @@ class PathPolicyValidatorTest {
     @Test
     void supportsAReadOnlyCwdAndAddsAPrivateWritableTemp() throws Exception {
         Path project = Files.createDirectory(root.resolve("project"));
-        Path writable = Files.createDirectories(project.resolve("src/test/java"));
-        SandboxPolicy policy =
-                SandboxPolicy.builder(project)
-                        .readOnlyWorkingDirectory()
-                        .writableRoot(writable)
-                        .build();
+        SandboxPolicy policy = SandboxPolicy.builder(project).readOnlyWorkingDirectory().build();
 
         ValidatedPolicy validated = PathPolicyValidator.validate(policy);
         try {
             assertFalse(validated.writableRoots().contains(project.toRealPath()));
-            assertTrue(validated.writableRoots().contains(writable.toRealPath()));
+            assertTrue(validated.writableRoots().size() == 1);
             assertTrue(validated.writableRoots().contains(validated.privateTempDirectory()));
             assertTrue(validated.readableRoots().contains(validated.privateTempDirectory()));
             assertTrue(Files.isDirectory(validated.privateTempDirectory()));

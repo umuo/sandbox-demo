@@ -50,7 +50,7 @@ flowchart LR
 
 - 攻击者可以控制 executable 参数、argv、stdin、脚本和沙箱中的子进程；
 - 攻击者可以控制声明可写目录内的文件名和内容；
-- Java Agent、SDK JAR、平台运行时、管理员 setup 阶段和宿主内核可信；
+- Java Agent、SDK JAR、平台运行时、可选管理员 setup 阶段和宿主内核可信；
 - 普通 Agent 执行阶段不能以 Administrator/root 身份运行。
 
 ## 公共执行流水线
@@ -95,7 +95,8 @@ PATH PATHEXT SystemRoot WINDIR ComSpec LANG LC_ALL TZ TERM
 
 | Strategy | 平台 |
 |---|---|
-| `WindowsProductionSandboxRunner` | Windows |
+| `WindowsRestrictedTokenSandboxRunner` | Windows 默认，零配置、网络不受限 |
+| `WindowsProductionSandboxRunner` | Windows 可选，专用账户与 Firewall |
 | `LinuxBubblewrapSandboxRunner` | Linux / WSL2 |
 | `MacOsSeatbeltSandboxRunner` | macOS |
 
@@ -112,6 +113,8 @@ PATH PATHEXT SystemRoot WINDIR ComSpec LANG LC_ALL TZ TERM
 - exit code 与截断状态；
 - 中断传播；
 - 私有临时目录清理。
+
+`SandboxClient` 在进入 Strategy 前根据后端 capabilities 统一拒绝不支持的 read/network/deletion policy。策略可以没有调用者声明的 writable root，此时仅校验层创建的每次执行私有临时目录可写，从而表达完整只读工作区。
 
 实际进程树约束由平台机制补强：Windows Job Object、Linux PID namespace、macOS Seatbelt 继承与 Java 监督。
 
@@ -160,7 +163,8 @@ Shell Adapter 负责语法选择；Sandbox Strategy 负责权限，两者互不�
 
 - Linux 找不到可信的绝对路径 `bwrap`；
 - macOS 无法进入嵌套 Seatbelt；
-- Windows 未执行 setup、账户 SID 不匹配或 Firewall 规则被修改；
+- Windows 默认后端从 elevated 进程启动，或请求 network deny；
+- Windows 可选后端未执行 setup、账户 SID 不匹配或 Firewall 规则被修改；
 - Windows 收到不支持的 `ReadPolicy.DECLARED_ONLY`；
 - worker 协议版本、magic 或边界长度无效；
 - executable 不是绝对路径且未显式允许 PATH 搜索。

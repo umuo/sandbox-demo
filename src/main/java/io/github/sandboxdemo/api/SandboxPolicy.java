@@ -27,6 +27,7 @@ public final class SandboxPolicy {
     private final List<Path> protectedPaths;
     private final NetworkPolicy networkPolicy;
     private final ReadPolicy readPolicy;
+    private final DeletionPolicy deletionPolicy;
     private final Duration timeout;
     private final int maxOutputBytes;
     private final boolean allowPathSearch;
@@ -38,13 +39,11 @@ public final class SandboxPolicy {
         this.protectedPaths = immutableNormalized(builder.protectedPaths);
         this.networkPolicy = Objects.requireNonNull(builder.networkPolicy, "networkPolicy");
         this.readPolicy = Objects.requireNonNull(builder.readPolicy, "readPolicy");
+        this.deletionPolicy = Objects.requireNonNull(builder.deletionPolicy, "deletionPolicy");
         this.timeout = Objects.requireNonNull(builder.timeout, "timeout");
         this.maxOutputBytes = builder.maxOutputBytes;
         this.allowPathSearch = builder.allowPathSearch;
 
-        if (writableRoots.isEmpty()) {
-            throw new IllegalArgumentException("at least one writable root is required");
-        }
         if (timeout.isZero() || timeout.isNegative()) {
             throw new IllegalArgumentException("timeout must be positive");
         }
@@ -101,6 +100,10 @@ public final class SandboxPolicy {
         return readPolicy;
     }
 
+    public DeletionPolicy deletionPolicy() {
+        return deletionPolicy;
+    }
+
     public Duration timeout() {
         return timeout;
     }
@@ -145,8 +148,9 @@ public final class SandboxPolicy {
         private final List<Path> readableRoots = new ArrayList<>();
         private final List<Path> writableRoots = new ArrayList<>();
         private final List<Path> protectedPaths = new ArrayList<>();
-        private NetworkPolicy networkPolicy = NetworkPolicy.DENY;
-        private ReadPolicy readPolicy = ReadPolicy.DECLARED_ONLY;
+        private NetworkPolicy networkPolicy = defaultNetworkPolicy();
+        private ReadPolicy readPolicy = defaultReadPolicy();
+        private DeletionPolicy deletionPolicy = DeletionPolicy.ALLOW;
         private Duration timeout = DEFAULT_TIMEOUT;
         private int maxOutputBytes = DEFAULT_MAX_OUTPUT_BYTES;
         private boolean allowPathSearch;
@@ -155,6 +159,18 @@ public final class SandboxPolicy {
             this.workingDirectory = Objects.requireNonNull(workingDirectory, "workingDirectory");
             this.readableRoots.add(workingDirectory);
             this.writableRoots.add(workingDirectory);
+        }
+
+        private static NetworkPolicy defaultNetworkPolicy() {
+            return SandboxPlatform.current() == SandboxPlatform.WINDOWS
+                    ? NetworkPolicy.ALLOW
+                    : NetworkPolicy.DENY;
+        }
+
+        private static ReadPolicy defaultReadPolicy() {
+            return SandboxPlatform.current() == SandboxPlatform.WINDOWS
+                    ? ReadPolicy.HOST
+                    : ReadPolicy.DECLARED_ONLY;
         }
 
         public Builder readableRoot(Path root) {
@@ -170,8 +186,9 @@ public final class SandboxPolicy {
         }
 
         /**
-         * Removes the builder's implicit write grant for the working directory. Callers must add at
-         * least one narrower writable root before building the policy.
+         * Removes the builder's implicit write grant for the working directory. If no narrower
+         * writable root is added, the resulting policy is read-only except for the SDK-managed
+         * private temporary directory.
          */
         public Builder readOnlyWorkingDirectory() {
             Path normalizedWorkingDirectory = normalize(workingDirectory);
@@ -191,6 +208,15 @@ public final class SandboxPolicy {
 
         public Builder readPolicy(ReadPolicy policy) {
             this.readPolicy = Objects.requireNonNull(policy, "policy");
+            return this;
+        }
+
+        /**
+         * Controls deletion and rename independently from create/in-place-write access. Backends
+         * that cannot enforce {@link DeletionPolicy#DENY} reject the request before execution.
+         */
+        public Builder deletion(DeletionPolicy policy) {
+            this.deletionPolicy = Objects.requireNonNull(policy, "policy");
             return this;
         }
 

@@ -215,6 +215,11 @@ public final class SandboxRequest {
             return this;
         }
 
+        public Builder deletion(DeletionPolicy deletionPolicy) {
+            policy.deletion(deletionPolicy);
+            return this;
+        }
+
         public Builder timeout(Duration timeout) {
             policy.timeout(timeout);
             return this;
@@ -266,10 +271,10 @@ public final class SandboxRequest {
                 + policy
                 + ", command="
                 + command
-                + ", environment="
-                + environment
-                + ", standardInput="
-                + Arrays.toString(standardInput)
+                + ", environmentKeys="
+                + environment.keySet()
+                + ", standardInputBytes="
+                + standardInput.length
                 + "]";
     }
 }

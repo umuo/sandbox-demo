@@ -12,6 +12,7 @@ Command parsing is not a security boundary. Every child is launched under an OS-
 
 - Missing prerequisites, unsupported policy combinations and setup/version mismatches fail closed.
 - The launcher clears the inherited environment and adds only a small allowlist plus caller-explicit values.
+- `SandboxClient` rejects read, network or deletion policies absent from the selected backend's advertised capabilities before invoking it. Request diagnostics expose environment names and stdin length, not environment values or stdin contents.
 - Bare executable lookup is disabled by default. Absolute executable paths are canonicalized before launch.
 - Policy paths must exist, are canonicalized immediately before setup and cannot contain symbolic-link components. Every run gets an owner-private temporary directory.
 - Output is bounded to 64 MiB per stream at the API level and 4 MiB by default.
@@ -32,12 +33,20 @@ Command parsing is not a security boundary. Every child is launched under an OS-
 - Network rules are absent for DENY and explicitly granted only for ALLOW.
 - Paths are passed through `sandbox-exec -D` parameters instead of interpolated into SBPL text.
 
-### Windows production backend
+### Windows setup-free default backend
+
+- `SandboxClient.create()` runs commands from the current unelevated user token; it creates no accounts, installs no worker and changes no Firewall state.
+- Windows defaults resolve to `ReadPolicy.HOST` and `NetworkPolicy.ALLOW`. The default backend advertises only ALLOW and fails closed if DENY is requested.
+- Each writable root receives a short-lived random capability-SID write ACE. With `DeletionPolicy.DENY`, the ACE omits `DELETE` and an inherited deny ACE covers `DELETE | FILE_DELETE_CHILD`. The target token uses `DISABLE_MAX_PRIVILEGE | WRITE_RESTRICTED` and deliberately omits the real user SID from its restricting list.
+- The target starts suspended with an explicit executable, sanitized environment, inherited-handle allowlist and private desktop, then joins a kill-on-close Job with active-process and memory bounds before resume.
+- UNC, non-NTFS and reparse-point paths are rejected; important paths remain open without delete sharing through execution.
+
+### Optional Windows dedicated-account backend
 
 - setup and run are separated. Only setup/uninstall requires elevation; the Agent and per-command runner remain unprivileged.
 - Commands run as a dedicated online/offline local user. Account passwords are random and stored with user-scoped DPAPI; account SID identity is revalidated before every run.
 - The offline account has persistent inbound and outbound Windows Firewall block rules scoped by SID. Firewall profiles, rule action/direction and SID scope are checked before a denied-network run.
-- Writable roots receive a short-lived random synthetic SID Modify ACE. That SID is placed in a token created with `DISABLE_MAX_PRIVILEGE | WRITE_RESTRICTED`. The production restricting list also contains the dedicated account SID, Everyone (`S-1-1-0`), the current logon-session SID and Windows' `S-1-5-33` Write Restricted Code compatibility SID. The development backend deliberately omits the real host-user SID, because including it would collapse its write boundary. The worker is started with `LOGON_WITH_PROFILE`; the target receives an allowlisted environment derived from that dedicated account via `CreateEnvironmentBlock`, with sandbox-controlled directories and explicit request values overlaid. This supports Win32/.NET initialization without inheriting the Agent process's secret environment. Compatibility SIDs grant nothing unless the normal account access check also passes and the object's DACL has a matching ACE. Consequently, the dedicated sandbox profile and a host location writable by Everyone remain writable; production hosts must not store trusted data in the sandbox accounts' profiles or expose security-sensitive world-writable locations. `LUA_TOKEN` is deliberately not used because it is UAC filtering rather than the capability-SID boundary. Protected roots receive a write/delete deny ACE for the current capability SID.
+- Writable roots receive a short-lived random synthetic SID write ACE. That SID is placed in a token created with `DISABLE_MAX_PRIVILEGE | WRITE_RESTRICTED`. `DeletionPolicy.DENY` additionally places a delete/delete-child deny ACE on each writable root while retaining create and in-place write access. The production restricting list also contains the dedicated account SID, Everyone (`S-1-1-0`), the current logon-session SID and Windows' `S-1-5-33` Write Restricted Code compatibility SID. The development backend deliberately omits the real host-user SID, because including it would collapse its write boundary. The worker is started with `LOGON_WITH_PROFILE`; the target receives an allowlisted environment derived from that dedicated account via `CreateEnvironmentBlock`, with sandbox-controlled directories and explicit request values overlaid. This supports Win32/.NET initialization without inheriting the Agent process's secret environment. Compatibility SIDs grant nothing unless the normal account access check also passes and the object's DACL has a matching ACE. Consequently, the dedicated sandbox profile and a host location writable by Everyone remain writable; production hosts must not store trusted data in the sandbox accounts' profiles or expose security-sensitive world-writable locations. `LUA_TOKEN` is deliberately not used because it is UAC filtering rather than the capability-SID boundary. Protected roots receive a write/delete deny ACE for the current capability SID.
 - Random capability ACEs are removed after each command. Dedicated-user root ACEs are recorded in a locked, fsynced ledger and removed at uninstall.
 - Declared readable-root ACEs for the dedicated accounts are persistent until uninstall; callers must select readable roots from a trusted service-side allowlist rather than pass arbitrary model input.
 - UNC, non-NTFS and reparse-point policy paths are rejected. Important path objects are opened without delete sharing and retained through execution.
@@ -52,6 +61,8 @@ Command parsing is not a security boundary. Every child is launched under an OS-
 Windows `WRITE_RESTRICTED` restricts write access, not reads. Dedicated accounts reduce access to private user data but ordinary `Users`/`Authenticated Users` ACEs can still expose host files. Applying restricting SIDs to all object access breaks many general Win32 toolchains because files, registry objects, services and IPC endpoints do not share one practical allowlist namespace.
 
 For that reason Windows accepts only explicit `ReadPolicy.HOST`; `DECLARED_ONLY` fails closed. Do not describe the native Windows backend as a confidentiality boundary. Use Hyper-V or another dedicated VM with explicit mounts for strict read isolation.
+
+The public capability reports `SandboxEnforcement.PARTIAL` on Windows so callers do not have to infer these ACL and hard-link gaps from prose. Linux and macOS report `FULL` within this document's threat model.
 
 ### Kernel and privileged attacks
 
@@ -71,7 +82,7 @@ Windows Job Objects and Linux PID namespaces are the primary strong tree boundar
 
 - Linux DENY blocks creation of socket endpoints with seccomp, including loopback and Unix-domain sockets. It relies on the trusted Java launcher not leaking pre-opened network descriptors.
 - macOS DENY is a Seatbelt network policy.
-- Windows DENY depends on the Windows Defender Firewall service and policy not being disabled or superseded after verification. Enterprise Group Policy must preserve the SID-scoped block rules.
+- The default Windows backend does not restrict network access. Windows DENY is available only through the explicitly installed dedicated-account backend and depends on Windows Defender Firewall state and policy.
 - Network ALLOW never grants access to secrets that are not otherwise reachable, but SSRF and access to local TCP services remain application risks.
 - Network ALLOW means this SDK adds no deny rule for the execution. Host Firewall, enterprise policy, routing and application authentication still apply; it is not a firewall bypass.
 
@@ -84,9 +95,9 @@ Resource exhaustion is only partially controlled. Windows has process and memory
 1. Use one freshly created workspace per task/tenant; the workspace parent is trusted and not writable by the sandbox user before policy setup.
 2. Keep runtime, launcher JAR, setup home and executable paths outside writable roots.
 3. Pin and verify dependencies and native tooling. Do not accept a caller-controlled `SANDBOX_BWRAP`, PATH, Windows home or resource-limit environment.
-4. Run setup/upgrade in a maintenance window with no active Windows sessions. Re-run setup for every newly deployed SDK version.
-5. Monitor Firewall state, setup failures, worker protocol failures, timeouts, output truncation and abandoned session directories.
-6. Run native integration tests on the exact OS image before promotion. macOS tests require `SANDBOX_RUN_PLATFORM_INTEGRATION=1`; Windows production tests require installed setup and `SANDBOX_WINDOWS_PRODUCTION_TEST=1`.
+4. When the optional dedicated-account backend is used, run setup/upgrade in a maintenance window and re-run setup for every deployed SDK version.
+5. Monitor timeouts and output truncation; also monitor Firewall, setup, worker protocol and session cleanup when the optional backend is enabled.
+6. Run native integration tests on the exact OS image before promotion. macOS tests require `SANDBOX_RUN_PLATFORM_INTEGRATION=1`; optional Windows dedicated-account tests require installed setup and `SANDBOX_WINDOWS_PRODUCTION_TEST=1`.
 7. Perform an independent security review before treating the implementation as a production control.
 
 ## VM boundary recommendation

@@ -35,11 +35,15 @@ public final class AgentSandboxService {
                 client.capabilities().supports(ReadPolicy.DECLARED_ONLY)
                         ? ReadPolicy.DECLARED_ONLY
                         : ReadPolicy.HOST;
+        NetworkPolicy network =
+                client.capabilities().supports(NetworkPolicy.DENY)
+                        ? NetworkPolicy.DENY
+                        : NetworkPolicy.ALLOW;
         SandboxRequest request =
                 SandboxRequest.builder(workspace, command)
                         .protect(workspace.resolve(".git"))
                         .readPolicy(reads)
-                        .network(NetworkPolicy.DENY)
+                        .network(network)
                         .timeout(Duration.ofMinutes(2))
                         .maxOutputBytes(4 * 1024 * 1024)
                         .environment(explicitEnvironment)

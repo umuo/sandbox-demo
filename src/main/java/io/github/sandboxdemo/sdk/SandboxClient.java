@@ -1,6 +1,7 @@
 package io.github.sandboxdemo.sdk;
 
 import io.github.sandboxdemo.api.CommandSpec;
+import io.github.sandboxdemo.api.SandboxBackendUnavailableException;
 import io.github.sandboxdemo.api.SandboxCapabilities;
 import io.github.sandboxdemo.api.SandboxException;
 import io.github.sandboxdemo.api.SandboxPlatform;
@@ -30,7 +31,7 @@ public final class SandboxClient {
         SandboxPlatform platform = SandboxPlatform.current();
         Path windowsHome =
                 builder.windowsHome == null
-                        ? SandboxRuntime.defaultWindowsHome()
+                        ? null
                         : builder.windowsHome.toAbsolutePath().normalize();
         if (builder.runner == null) {
             this.runner = DefaultSandboxRunnerFactory.create(windowsHome);
@@ -44,7 +45,7 @@ public final class SandboxClient {
         }
     }
 
-    /** Creates a client with the default platform backend and runtime location. */
+    /** Creates a client with the setup-free default platform backend. */
     public static SandboxClient create() {
         return builder().build();
     }
@@ -57,7 +58,30 @@ public final class SandboxClient {
     /** Executes one request synchronously and supervises the complete process tree. */
     public SandboxResult execute(SandboxRequest request)
             throws SandboxException, InterruptedException {
-        return runner.execute(Objects.requireNonNull(request, "request"));
+        SandboxRequest required = Objects.requireNonNull(request, "request");
+        SandboxPolicy policy = required.policy();
+        if (!capabilities.supports(policy.readPolicy())) {
+            throw new SandboxBackendUnavailableException(
+                    "sandbox backend "
+                            + capabilities.backendName()
+                            + " does not support read policy "
+                            + policy.readPolicy());
+        }
+        if (!capabilities.supports(policy.networkPolicy())) {
+            throw new SandboxBackendUnavailableException(
+                    "sandbox backend "
+                            + capabilities.backendName()
+                            + " does not support network policy "
+                            + policy.networkPolicy());
+        }
+        if (!capabilities.supports(policy.deletionPolicy())) {
+            throw new SandboxBackendUnavailableException(
+                    "sandbox backend "
+                            + capabilities.backendName()
+                            + " does not support deletion policy "
+                            + policy.deletionPolicy());
+        }
+        return runner.execute(required);
     }
 
     /** Convenience overload for a request without additional environment variables. */
@@ -91,10 +115,18 @@ public final class SandboxClient {
 
         private Builder() {}
 
-        /** Overrides the Windows setup/runtime directory. Ignored on Linux and macOS. */
+        /**
+         * Selects the opt-in dedicated-account Windows backend at this setup/runtime directory.
+         * Ignored on Linux and macOS.
+         */
         public Builder windowsHome(Path windowsHome) {
             this.windowsHome = Objects.requireNonNull(windowsHome, "windowsHome");
             return this;
+        }
+
+        /** Clearer alias for {@link #windowsHome(Path)}. */
+        public Builder windowsProductionHome(Path windowsHome) {
+            return windowsHome(windowsHome);
         }
 
         /**

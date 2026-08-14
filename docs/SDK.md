@@ -35,14 +35,14 @@ io.github.sandboxdemo.sdk
 - `SandboxRequest`：一次执行的不可变请求；Builder 同时配置命令、策略和环境变量。
 - `SandboxPolicy`：需要复用策略时可单独构建。
 - `SandboxResult`：退出码、timeout、stdout/stderr、截断标志和执行时长。
-- `SandboxRuntime`：Windows 安装/升级/卸载以及运行时健康检查。
-- `SandboxCapabilities`：后端支持的读取和网络策略，用于 Agent 启动时协商能力。
+- `SandboxRuntime`：运行时健康检查，以及可选 Windows 专用账户后端的安装/升级/卸载。
+- `SandboxCapabilities`：后端支持的读取/网络策略和 enforcement 完整性，用于 Agent 启动时协商能力。
 
 `core`、`platform` 和 `demo` 包没有 SDK 兼容性承诺。
 
 ## Agent 服务封装
 
-`SandboxClient` 可以作为单例使用；执行方法没有共享的可变策略状态，可以由多个 Agent 请求并发调用。Windows setup/uninstall 必须放在维护窗口，不能与执行并发。
+`SandboxClient` 可以作为单例使用；执行方法没有共享的可变策略状态，可以由多个 Agent 请求并发调用。默认 Windows 后端不需要 setup。只有显式启用专用账户后端时，setup/uninstall 才必须放在维护窗口且不能与执行并发。
 
 ```java
 import io.github.sandboxdemo.api.*;
@@ -71,11 +71,14 @@ public final class AgentSandboxService {
         ReadPolicy reads = client.capabilities().supports(ReadPolicy.DECLARED_ONLY)
                 ? ReadPolicy.DECLARED_ONLY
                 : ReadPolicy.HOST;
+        NetworkPolicy network = client.capabilities().supports(NetworkPolicy.DENY)
+                ? NetworkPolicy.DENY
+                : NetworkPolicy.ALLOW;
 
         SandboxRequest request = SandboxRequest.builder(workspace, command)
                 .protect(workspace.resolve(".git"))
                 .readPolicy(reads)
-                .network(NetworkPolicy.DENY)
+                .network(network)
                 .timeout(Duration.ofMinutes(2))
                 .maxOutputBytes(4 * 1024 * 1024)
                 .environment(explicitEnvironment)
@@ -86,7 +89,9 @@ public final class AgentSandboxService {
 }
 ```
 
-`status()` 是不修改持久配置的部署健康检查，也不会执行不可信命令。Windows 验证安装元数据、账户和 Firewall；Linux 实际运行一次可信 bubblewrap namespace 探针；macOS 实际运行一次可信 Seatbelt 探针。因此它能在启动阶段发现“文件存在但内核/AppArmor/外层 sandbox 拒绝使用”的环境。实际请求还会验证其动态路径/profile，调用方仍必须处理 `SandboxBackendUnavailableException`。
+`status()` 是不修改持久配置的部署健康检查，也不会执行不可信命令。Windows 默认实际运行一次临时 restricted-token 探针；Linux 运行可信 bubblewrap namespace 探针；macOS 运行可信 Seatbelt 探针。显式专用账户后端则验证安装元数据、账户和 Firewall。因此它能在启动阶段发现“文件存在但内核或宿主策略拒绝使用”的环境。实际请求还会验证动态路径/profile，调用方仍必须处理 `SandboxBackendUnavailableException`。
+
+`client.capabilities().enforcement()` 返回 `FULL` 或 `PARTIAL`。当前 Windows 原生后端返回 `PARTIAL`，因为宿主中向 Everyone 开放写权限的对象及 hard link 不能被 ACL 模型完整收敛；Linux 与 macOS 返回 `FULL`（均以安全文档中的威胁模型为限）。
 
 不要把模型生成的整条字符串直接当作 executable。Agent 的 Shell Adapter 应明确构造 argv：
 
@@ -108,7 +113,7 @@ SDK 不会隐式插入 shell，也不会解析命令字符串进行安全判断�
 ## Windows 选择性写权限
 
 Builder 默认把 working directory 同时作为 readable 和 writable root。若项目根必须只读，
-仅允许生成或修改测试代码，应先撤销这个默认写授权，再声明更窄的 writable root：
+可以只撤销默认写授权；若仅允许生成或修改测试代码，再声明更窄的 writable root：
 
 ```java
 Path project = Path.of("D:\\projects\\my-agent").toRealPath();
@@ -125,23 +130,46 @@ SandboxRequest request = SandboxRequest.builder(project, powershell.toString())
         .writableRoot(testSources)
         .readPolicy(ReadPolicy.HOST)
         .network(NetworkPolicy.ALLOW)
+        .deletion(DeletionPolicy.DENY)
         .timeout(Duration.ofMinutes(2))
         .build();
 ```
 
-权限效果：
+默认零配置 Windows 后端的权限效果：
 
-- `project`：SDK 为专用账户授予读取/执行，写入由 write-restricted token 拒绝；
+- `project`：当前普通用户读取，写入由 write-restricted token 拒绝；
 - `project\src\test\java`：读取和写入；
-- `%USERPROFILE%\AppData`：为专用账户授予读取/执行；
-- 网络：使用 online sandbox account，SDK 不安装本次执行的阻断策略；
+- 删除/重命名：`DeletionPolicy.DENY` 使 writable root 内的操作被 NTFS ACL 拒绝；
+- `%USERPROFILE%\AppData`：按当前用户原有 ACL 读取；
+- 网络：SDK 不增加网络阻断；
 - SDK 私有临时目录：内部读写，执行结束后尽力清理，不要求项目根可写。
 
+`readOnlyWorkingDirectory()` 后不调用 `writableRoot(...)` 是合法策略，表示调用者声明的所有业务路径只读。私有临时目录仍会加入后端的内部读写根，但不会作为持久输出返回给调用者。
+
+Fat JAR 的 `run` 命令使用 `--read-only-cwd` 表达同一语义；该选项可以与更窄的 `--writable PATH` 重复项组合。
+
 所有声明路径必须事先存在，并且不得包含 reparse point。Windows 的 `HOST` 模式不是读取
-白名单：普通 Windows ACL 允许的其他宿主文件仍可能可读。AppData 的读取 ACE 会记录在
-SDK 安装账本中并持续到 `uninstall-windows`，因此不要把调用方任意路径直接作为
-`readableRoot`，只允许服务端配置的可信目录。完整案例位于
+白名单：当前用户 ACL 允许的其他宿主文件仍可能可读。完整案例位于
 `examples/sdk-consumer/src/main/java/example/WindowsSelectiveWriteExample.java`。
+
+如果运行期间会频繁调整规则，应把配置转换成每次执行的不可变策略快照。可以复用同一
+个线程安全的 `SandboxClient`，但不要尝试修改已经运行中的请求：
+
+```java
+SandboxRequest.Builder next = SandboxRequest.builder(workspace, powershell)
+        .arguments("-NoProfile", "-NonInteractive", "-Command", command)
+        .readOnlyWorkingDirectory()
+        .readPolicy(ReadPolicy.HOST)
+        .network(NetworkPolicy.ALLOW)
+        .deletion(DeletionPolicy.DENY);
+for (Path root : currentWritableRoots) {
+    next.writableRoot(root.toRealPath());
+}
+SandboxResult result = client.execute(next.build());
+```
+
+可运行的双请求切换示例位于
+`examples/sdk-consumer/src/main/java/example/WindowsDynamicPolicyExample.java`。
 
 ## 中断、超时与输出
 
@@ -162,9 +190,20 @@ SDK 默认不会继承 Agent 的 API Key、云凭据或数据库密码。只有�
 TEMP TMP TMPDIR HOME USERPROFILE XDG_CACHE_HOME
 ```
 
-## Windows 生命周期
+## Windows 默认生命周期
 
-推荐安装器从管理员终端执行 CLI：
+默认 Windows 后端不创建本地账户、不安装 worker、不修改 Firewall，也不要求管理员权限：
+
+```java
+SandboxClient client = SandboxClient.create();
+SandboxRuntimeStatus status = client.status();
+```
+
+默认后端拒绝从 elevated 进程执行；应以普通用户启动 Agent。Windows Builder 自动采用 `ReadPolicy.HOST` 与 `NetworkPolicy.ALLOW`。
+
+## 可选 Windows 专用账户后端
+
+只有需要 SDK 管理的网络阻断时，才从管理员终端安装：
 
 ```powershell
 java -jar agent-sandbox-sdk-1.0.0-all.jar setup-windows
@@ -178,17 +217,19 @@ SandboxRuntime.installWindows(SandboxRuntime.defaultWindowsHome());
 
 SDK 作为普通 Maven 依赖时，setup 会自动定位并复制最小 worker classpath：SDK JAR、JNA 和 JNA Platform。Agent 不再需要把整个应用打包成一个 fat JAR。对于使用 Spring Boot nested JAR 等非文件 classpath 的部署，建议使用独立 CLI 完成 setup。
 
-日常 Agent 进程不得使用管理员权限。启动时检查：
+安装后显式选择，不改变 `SandboxClient.create()` 的零配置默认：
 
 ```java
-SandboxRuntimeStatus status = SandboxRuntime.status();
+SandboxClient client = SandboxClient.builder()
+        .windowsProductionHome(SandboxRuntime.defaultWindowsHome())
+        .build();
 ```
 
 升级 SDK 后必须在停止执行任务的维护窗口重新运行 setup，使已安装 worker 与 SDK 版本同步。
 
 ## 错误处理
 
-- `SandboxBackendUnavailableException`：缺少 bubblewrap、Seatbelt 无法嵌套、Windows 未 setup 或策略不受支持。禁止降级成普通 `ProcessBuilder`。
+- `SandboxBackendUnavailableException`：缺少 bubblewrap、Seatbelt 无法嵌套、Windows elevated 运行、显式专用账户后端未 setup，或策略不受支持。禁止降级成普通 `ProcessBuilder`。
 - `SandboxException`：setup、ACL、进程创建、协议、输出读取等执行失败。
 - `IllegalArgumentException`：请求本身不合法，例如保留环境变量、过量参数或无效策略。
 - `InterruptedException`：上层取消或服务停止；调用方应继续传播中断。

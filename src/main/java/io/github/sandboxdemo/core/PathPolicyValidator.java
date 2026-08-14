@@ -72,6 +72,7 @@ public final class PathPolicyValidator {
                     temp,
                     policy.networkPolicy(),
                     policy.readPolicy(),
+                    policy.deletionPolicy(),
                     policy.timeout(),
                     policy.maxOutputBytes(),
                     policy.allowPathSearch());

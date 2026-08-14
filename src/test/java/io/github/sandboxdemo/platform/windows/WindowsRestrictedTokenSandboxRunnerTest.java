@@ -4,11 +4,11 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.github.sandboxdemo.api.CommandSpec;
-import io.github.sandboxdemo.api.NetworkPolicy;
-import io.github.sandboxdemo.api.ReadPolicy;
+import io.github.sandboxdemo.api.DeletionPolicy;
 import io.github.sandboxdemo.api.SandboxPolicy;
 import io.github.sandboxdemo.api.SandboxRequest;
 import io.github.sandboxdemo.api.SandboxResult;
+import io.github.sandboxdemo.sdk.SandboxClient;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
@@ -22,14 +22,18 @@ class WindowsRestrictedTokenSandboxRunnerTest {
     @TempDir Path root;
 
     @Test
+    void defaultClientAndReadinessProbeRequireNoSetup() throws Exception {
+        assertTrue(SandboxClient.create().backendName().equals("windows-restricted-token"));
+        assertTrue(
+                WindowsRestrictedTokenSandboxRunner.probeBackend()
+                        .contains("setup-free Windows restricted-token probe passed"));
+    }
+
+    @Test
     void permitsWorkspaceWriteAndBlocksSiblingWrite() throws Exception {
         Path workspace = Files.createDirectory(root.resolve("workspace with spaces"));
         Path outside = Files.createDirectory(root.resolve("outside with spaces"));
-        SandboxPolicy policy =
-                SandboxPolicy.builder(workspace)
-                        .network(NetworkPolicy.ALLOW)
-                        .readPolicy(ReadPolicy.HOST)
-                        .build();
+        SandboxPolicy policy = SandboxPolicy.builder(workspace).build();
         WindowsRestrictedTokenSandboxRunner runner = new WindowsRestrictedTokenSandboxRunner();
 
         Path allowed = workspace.resolve("allowed.txt");
@@ -43,14 +47,55 @@ class WindowsRestrictedTokenSandboxRunnerTest {
         assertFalse(Files.exists(blocked));
     }
 
+    @Test
+    void permitsCreateAndModifyButBlocksDeleteAndRename() throws Exception {
+        Path workspace = Files.createDirectory(root.resolve("no-delete-workspace"));
+        Path existing = Files.write(workspace.resolve("existing.txt"), new byte[] {1});
+        Path created = workspace.resolve("created.txt");
+        Path renamed = workspace.resolve("renamed.txt");
+        SandboxPolicy policy =
+                SandboxPolicy.builder(workspace).deletion(DeletionPolicy.DENY).build();
+        WindowsRestrictedTokenSandboxRunner runner = new WindowsRestrictedTokenSandboxRunner();
+
+        SandboxResult writeResult =
+                runner.execute(
+                        SandboxRequest.of(
+                                policy,
+                                cmd(
+                                        "echo modified>\""
+                                                + existing
+                                                + "\" & echo created>\""
+                                                + created
+                                                + "\"")));
+        assertTrue(writeResult.successful(), failureDetails(writeResult));
+        assertTrue(Files.exists(created));
+
+        SandboxResult deleteResult =
+                runner.execute(SandboxRequest.of(policy, cmd("del /f /q \"" + existing + "\"")));
+        assertFalse(deleteResult.successful());
+        assertTrue(Files.exists(existing));
+
+        SandboxResult renameResult =
+                runner.execute(
+                        SandboxRequest.of(
+                                policy, cmd("move /y \"" + existing + "\" \"" + renamed + "\"")));
+        assertFalse(renameResult.successful());
+        assertTrue(Files.exists(existing));
+        assertFalse(Files.exists(renamed));
+    }
+
     private static CommandSpec cmdWrite(Path target) {
+        return cmd("echo test>\"" + target + "\"");
+    }
+
+    private static CommandSpec cmd(String command) {
         String systemRoot = System.getenv().getOrDefault("SystemRoot", "C:\\Windows");
         return CommandSpec.of(
                 java.nio.file.Paths.get(systemRoot, "System32", "cmd.exe").toString(),
                 "/d",
                 "/s",
                 "/c",
-                "echo test>\"" + target + "\"");
+                command);
     }
 
     private static String failureDetails(SandboxResult result) {
