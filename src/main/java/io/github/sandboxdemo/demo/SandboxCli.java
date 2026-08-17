@@ -87,6 +87,7 @@ public final class SandboxCli {
         int maxOutputBytes = 4 * 1024 * 1024;
         boolean allowPathSearch = false;
         boolean readOnlyWorkingDirectory = false;
+        boolean stream = false;
         int separator = -1;
 
         for (int i = 1; i < args.length; i++) {
@@ -131,6 +132,9 @@ public final class SandboxCli {
                 case "--allow-path-search":
                     allowPathSearch = true;
                     break;
+                case "--stream":
+                    stream = true;
+                    break;
                 case "--env":
                     addEnvironment(environment, requireValue(args, ++i, "--env"));
                     break;
@@ -169,11 +173,40 @@ public final class SandboxCli {
                         args[separator + 1],
                         io.github.sandboxdemo.core.Java8.listOf(args)
                                 .subList(separator + 2, args.length));
+        java.util.function.Consumer<byte[]> stdoutConsumer = null;
+        java.util.function.Consumer<byte[]> stderrConsumer = null;
+        if (stream) {
+            stdoutConsumer =
+                    chunk -> {
+                        try {
+                            System.out.write(chunk);
+                            System.out.flush();
+                        } catch (Exception ignored) {
+                        }
+                    };
+            stderrConsumer =
+                    chunk -> {
+                        try {
+                            System.err.write(chunk);
+                            System.err.flush();
+                        } catch (Exception ignored) {
+                        }
+                    };
+        }
+        SandboxRequest request =
+                new SandboxRequest(
+                        policy.build(),
+                        command,
+                        environment,
+                        new byte[0],
+                        stdoutConsumer,
+                        stderrConsumer);
         SandboxClient runner = SandboxClient.create();
-        SandboxResult result =
-                runner.execute(new SandboxRequest(policy.build(), command, environment));
-        System.out.write(result.stdout());
-        System.err.write(result.stderr());
+        SandboxResult result = runner.execute(request);
+        if (!stream) {
+            System.out.write(result.stdout());
+            System.err.write(result.stderr());
+        }
         return result.timedOut() ? 124 : result.exitCode();
     }
 
@@ -383,6 +416,7 @@ public final class SandboxCli {
                         "  --timeout MILLIS",
                         "  --max-output-bytes BYTES",
                         "  --allow-path-search explicitly permit resolving outer argv[0] through PATH",
+                        "  --stream            stream stdout and stderr to the console in real time",
                         "  --env KEY=VALUE     explicitly pass an environment variable"));
     }
 }

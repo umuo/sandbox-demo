@@ -1,5 +1,8 @@
 package io.github.sandboxdemo.api;
 
+import io.github.sandboxdemo.core.OutputCharsetDetector;
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -11,6 +14,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.function.Consumer;
 
 /** One command execution request and its explicitly supplied environment. */
 public final class SandboxRequest {
@@ -33,12 +37,50 @@ public final class SandboxRequest {
     private final CommandSpec command;
     private final Map<String, String> environment;
     private final byte[] standardInput;
+    private final Consumer<byte[]> stdoutConsumer;
+    private final Consumer<byte[]> stderrConsumer;
+    private final Consumer<String> stdoutTextConsumer;
+    private final Consumer<String> stderrTextConsumer;
+    private final Charset stdoutCharset;
+    private final Charset stderrCharset;
+    private final boolean stdoutCharsetAuto;
+    private final boolean stderrCharsetAuto;
 
     public SandboxRequest(
             SandboxPolicy policy,
             CommandSpec command,
             Map<String, String> environment,
-            byte[] standardInput) {
+            byte[] standardInput,
+            Consumer<byte[]> stdoutConsumer,
+            Consumer<byte[]> stderrConsumer) {
+        this(
+                policy,
+                command,
+                environment,
+                standardInput,
+                stdoutConsumer,
+                stderrConsumer,
+                null,
+                null,
+                StandardCharsets.UTF_8,
+                StandardCharsets.UTF_8,
+                false,
+                false);
+    }
+
+    private SandboxRequest(
+            SandboxPolicy policy,
+            CommandSpec command,
+            Map<String, String> environment,
+            byte[] standardInput,
+            Consumer<byte[]> stdoutConsumer,
+            Consumer<byte[]> stderrConsumer,
+            Consumer<String> stdoutTextConsumer,
+            Consumer<String> stderrTextConsumer,
+            Charset stdoutCharset,
+            Charset stderrCharset,
+            boolean stdoutCharsetAuto,
+            boolean stderrCharsetAuto) {
         this.policy = Objects.requireNonNull(policy, "policy");
         this.command = Objects.requireNonNull(command, "command");
         Map<String, String> copiedEnvironment =
@@ -56,15 +98,31 @@ public final class SandboxRequest {
         }
         this.environment = copiedEnvironment;
         this.standardInput = copiedStandardInput;
+        this.stdoutConsumer = stdoutConsumer;
+        this.stderrConsumer = stderrConsumer;
+        this.stdoutTextConsumer = stdoutTextConsumer;
+        this.stderrTextConsumer = stderrTextConsumer;
+        this.stdoutCharset = Objects.requireNonNull(stdoutCharset, "stdoutCharset");
+        this.stderrCharset = Objects.requireNonNull(stderrCharset, "stderrCharset");
+        this.stdoutCharsetAuto = stdoutCharsetAuto;
+        this.stderrCharsetAuto = stderrCharsetAuto;
+    }
+
+    public SandboxRequest(
+            SandboxPolicy policy,
+            CommandSpec command,
+            Map<String, String> environment,
+            byte[] standardInput) {
+        this(policy, command, environment, standardInput, null, null);
     }
 
     public SandboxRequest(
             SandboxPolicy policy, CommandSpec command, Map<String, String> environment) {
-        this(policy, command, environment, new byte[0]);
+        this(policy, command, environment, new byte[0], null, null);
     }
 
     public static SandboxRequest of(SandboxPolicy policy, CommandSpec command) {
-        return new SandboxRequest(policy, command, Collections.emptyMap(), new byte[0]);
+        return new SandboxRequest(policy, command, Collections.emptyMap(), new byte[0], null, null);
     }
 
     public SandboxPolicy policy() {
@@ -81,6 +139,40 @@ public final class SandboxRequest {
 
     public byte[] standardInput() {
         return Arrays.copyOf(standardInput, standardInput.length);
+    }
+
+    public Consumer<byte[]> stdoutConsumer() {
+        return stdoutConsumer;
+    }
+
+    public Consumer<byte[]> stderrConsumer() {
+        return stderrConsumer;
+    }
+
+    public Consumer<String> stdoutTextConsumer() {
+        return stdoutTextConsumer;
+    }
+
+    public Consumer<String> stderrTextConsumer() {
+        return stderrTextConsumer;
+    }
+
+    /** Charset used directly, or as the fallback when stdout auto-detection is enabled. */
+    public Charset stdoutCharset() {
+        return stdoutCharset;
+    }
+
+    /** Charset used directly, or as the fallback when stderr auto-detection is enabled. */
+    public Charset stderrCharset() {
+        return stderrCharset;
+    }
+
+    public boolean stdoutCharsetAuto() {
+        return stdoutCharsetAuto;
+    }
+
+    public boolean stderrCharsetAuto() {
+        return stderrCharsetAuto;
     }
 
     /** Starts an Agent-friendly builder without inserting a shell implicitly. */
@@ -136,6 +228,14 @@ public final class SandboxRequest {
         private final List<String> arguments;
         private final Map<String, String> environment = new LinkedHashMap<>();
         private byte[] standardInput = new byte[0];
+        private Consumer<byte[]> stdoutConsumer;
+        private Consumer<byte[]> stderrConsumer;
+        private Consumer<String> stdoutTextConsumer;
+        private Consumer<String> stderrTextConsumer;
+        private Charset stdoutCharset = StandardCharsets.UTF_8;
+        private Charset stderrCharset = StandardCharsets.UTF_8;
+        private boolean stdoutCharsetAuto;
+        private boolean stderrCharsetAuto;
 
         private Builder(Path workingDirectory, CommandSpec command) {
             this.policy = SandboxPolicy.builder(workingDirectory);
@@ -181,7 +281,120 @@ public final class SandboxRequest {
         public Builder standardInputUtf8(String standardInput) {
             return standardInput(
                     Objects.requireNonNull(standardInput, "standardInput")
-                            .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                            .getBytes(StandardCharsets.UTF_8));
+        }
+
+        /** Registers a real-time consumer for raw standard output bytes. */
+        public Builder stdoutConsumer(Consumer<byte[]> stdoutConsumer) {
+            if (stdoutConsumer == null) {
+                return this;
+            }
+            this.stdoutConsumer = combineConsumers(this.stdoutConsumer, stdoutConsumer);
+            return this;
+        }
+
+        /** Registers a real-time consumer for raw standard error bytes. */
+        public Builder stderrConsumer(Consumer<byte[]> stderrConsumer) {
+            if (stderrConsumer == null) {
+                return this;
+            }
+            this.stderrConsumer = combineConsumers(this.stderrConsumer, stderrConsumer);
+            return this;
+        }
+
+        /** Registers a real-time stdout text consumer (UTF-8 unless configured otherwise). */
+        public Builder stdoutTextConsumer(Consumer<String> stdoutTextConsumer) {
+            Objects.requireNonNull(stdoutTextConsumer, "stdoutTextConsumer");
+            this.stdoutTextConsumer = combineConsumers(this.stdoutTextConsumer, stdoutTextConsumer);
+            return this;
+        }
+
+        /** Registers a real-time stderr text consumer (UTF-8 unless configured otherwise). */
+        public Builder stderrTextConsumer(Consumer<String> stderrTextConsumer) {
+            Objects.requireNonNull(stderrTextConsumer, "stderrTextConsumer");
+            this.stderrTextConsumer = combineConsumers(this.stderrTextConsumer, stderrTextConsumer);
+            return this;
+        }
+
+        /** Uses one explicit charset for both stdout and stderr text callbacks. */
+        public Builder outputCharset(Charset charset) {
+            return stdoutCharset(charset).stderrCharset(charset);
+        }
+
+        /** Uses an explicit charset for stdout text callbacks. */
+        public Builder stdoutCharset(Charset charset) {
+            this.stdoutCharset = Objects.requireNonNull(charset, "charset");
+            this.stdoutCharsetAuto = false;
+            return this;
+        }
+
+        /** Uses an explicit charset for stderr text callbacks. */
+        public Builder stderrCharset(Charset charset) {
+            this.stderrCharset = Objects.requireNonNull(charset, "charset");
+            this.stderrCharsetAuto = false;
+            return this;
+        }
+
+        /** Auto-detects both text streams and falls back to the platform output charset. */
+        public Builder outputCharsetAuto() {
+            Charset fallback = OutputCharsetDetector.platformFallbackCharset();
+            return outputCharsetAuto(fallback);
+        }
+
+        /** Auto-detects both text streams with an explicit legacy-encoding fallback. */
+        public Builder outputCharsetAuto(Charset fallback) {
+            stdoutCharsetAuto(fallback);
+            stderrCharsetAuto(fallback);
+            return this;
+        }
+
+        public Builder stdoutCharsetAuto() {
+            return stdoutCharsetAuto(OutputCharsetDetector.platformFallbackCharset());
+        }
+
+        public Builder stdoutCharsetAuto(Charset fallback) {
+            this.stdoutCharset = Objects.requireNonNull(fallback, "fallback");
+            this.stdoutCharsetAuto = true;
+            return this;
+        }
+
+        public Builder stderrCharsetAuto() {
+            return stderrCharsetAuto(OutputCharsetDetector.platformFallbackCharset());
+        }
+
+        public Builder stderrCharsetAuto(Charset fallback) {
+            this.stderrCharset = Objects.requireNonNull(fallback, "fallback");
+            this.stderrCharsetAuto = true;
+            return this;
+        }
+
+        /** Registers a structured {@link SandboxOutputListener} for stdout and stderr streaming. */
+        public Builder outputListener(SandboxOutputListener listener) {
+            Objects.requireNonNull(listener, "listener");
+            stdoutConsumer(listener::onStdout);
+            stdoutTextConsumer(listener::onStdoutText);
+            stderrConsumer(listener::onStderr);
+            stderrTextConsumer(listener::onStderrText);
+            return this;
+        }
+
+        private static <T> Consumer<T> combineConsumers(
+                Consumer<T> existing, Consumer<T> additional) {
+            if (existing == null) {
+                return additional;
+            }
+            return value -> {
+                acceptIgnoringFailure(existing, value);
+                acceptIgnoringFailure(additional, value);
+            };
+        }
+
+        private static <T> void acceptIgnoringFailure(Consumer<T> consumer, T value) {
+            try {
+                consumer.accept(value);
+            } catch (Throwable ignored) {
+                // One callback must not suppress later callbacks or process supervision.
+            }
         }
 
         public Builder readableRoot(Path root) {
@@ -240,7 +453,15 @@ public final class SandboxRequest {
                     policy.build(),
                     new CommandSpec(executable, arguments),
                     environment,
-                    standardInput);
+                    standardInput,
+                    stdoutConsumer,
+                    stderrConsumer,
+                    stdoutTextConsumer,
+                    stderrTextConsumer,
+                    stdoutCharset,
+                    stderrCharset,
+                    stdoutCharsetAuto,
+                    stderrCharsetAuto);
         }
     }
 
@@ -256,12 +477,24 @@ public final class SandboxRequest {
         return policy.equals(that.policy)
                 && command.equals(that.command)
                 && environment.equals(that.environment)
-                && Arrays.equals(standardInput, that.standardInput);
+                && Arrays.equals(standardInput, that.standardInput)
+                && stdoutCharset.equals(that.stdoutCharset)
+                && stderrCharset.equals(that.stderrCharset)
+                && stdoutCharsetAuto == that.stdoutCharsetAuto
+                && stderrCharsetAuto == that.stderrCharsetAuto;
     }
 
     @Override
     public int hashCode() {
-        int result = Objects.hash(policy, command, environment);
+        int result =
+                Objects.hash(
+                        policy,
+                        command,
+                        environment,
+                        stdoutCharset,
+                        stderrCharset,
+                        stdoutCharsetAuto,
+                        stderrCharsetAuto);
         return 31 * result + Arrays.hashCode(standardInput);
     }
 

@@ -85,7 +85,19 @@ public final class WindowsProductionSandboxRunner implements SandboxRunner {
                                 acl.capabilitySids());
                 WindowsWorkerProtocol.writeRequest(session.requestFile(), workerRequest);
                 session.sealRequest(credential.sid());
-                return WindowsWorkerLauncher.execute(credential, runtime, session, policy);
+                return WindowsWorkerLauncher.execute(
+                        credential,
+                        runtime,
+                        session,
+                        policy,
+                        request.stdoutConsumer(),
+                        request.stderrConsumer(),
+                        request.stdoutTextConsumer(),
+                        request.stderrTextConsumer(),
+                        request.stdoutCharset(),
+                        request.stderrCharset(),
+                        request.stdoutCharsetAuto(),
+                        request.stderrCharsetAuto());
             }
         } finally {
             PathPolicyValidator.cleanup(policy);

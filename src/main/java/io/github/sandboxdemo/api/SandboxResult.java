@@ -1,5 +1,7 @@
 package io.github.sandboxdemo.api;
 
+import io.github.sandboxdemo.core.OutputCharsetDetector;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Arrays;
@@ -67,6 +69,36 @@ public final class SandboxResult {
 
     public String stderrUtf8() {
         return new String(stderr, StandardCharsets.UTF_8);
+    }
+
+    /** Decodes captured stdout using an explicitly selected charset. */
+    public String stdoutText(Charset charset) {
+        return new String(stdout, Objects.requireNonNull(charset, "charset"));
+    }
+
+    /** Decodes captured stderr using an explicitly selected charset. */
+    public String stderrText(Charset charset) {
+        return new String(stderr, Objects.requireNonNull(charset, "charset"));
+    }
+
+    /** Detects BOM/UTF-8 and otherwise falls back to the platform output charset. */
+    public String stdoutTextAuto() {
+        return OutputCharsetDetector.decodeAuto(stdout);
+    }
+
+    /** Detects BOM/UTF-8 and otherwise falls back to the platform output charset. */
+    public String stderrTextAuto() {
+        return OutputCharsetDetector.decodeAuto(stderr);
+    }
+
+    /** Auto-detects stdout with an explicit fallback for ambiguous legacy bytes. */
+    public String stdoutTextAuto(Charset fallback) {
+        return OutputCharsetDetector.decodeAuto(stdout, fallback);
+    }
+
+    /** Auto-detects stderr with an explicit fallback for ambiguous legacy bytes. */
+    public String stderrTextAuto(Charset fallback) {
+        return OutputCharsetDetector.decodeAuto(stderr, fallback);
     }
 
     public boolean successful() {

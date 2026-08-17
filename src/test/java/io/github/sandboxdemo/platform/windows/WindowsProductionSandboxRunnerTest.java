@@ -13,6 +13,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Locale;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
@@ -25,6 +26,30 @@ import org.junit.jupiter.api.io.TempDir;
 class WindowsProductionSandboxRunnerTest {
 
     @TempDir Path root;
+
+    @Test
+    void streamsOutputFromTheDedicatedWorker() throws Exception {
+        Path workspace = Files.createDirectory(root.resolve("streaming-workspace"));
+        AtomicReference<String> streamed = new AtomicReference<>("");
+
+        SandboxResult result =
+                new WindowsProductionSandboxRunner()
+                        .execute(
+                                SandboxRequest.builder(workspace, systemExecutable("cmd.exe"))
+                                        .arguments("/d", "/s", "/c", "echo dedicated-worker-stream")
+                                        .network(NetworkPolicy.DENY)
+                                        .readPolicy(ReadPolicy.HOST)
+                                        .timeout(Duration.ofSeconds(5))
+                                        .outputCharsetAuto()
+                                        .stdoutTextConsumer(
+                                                text ->
+                                                        streamed.updateAndGet(
+                                                                value -> value + text))
+                                        .build());
+
+        assertSuccessful(result);
+        assertTrue(streamed.get().contains("dedicated-worker-stream"));
+    }
 
     @Test
     void enforcesIdentityWritesProtectedPathsEnvironmentAndTimeout() throws Exception {

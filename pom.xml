@@ -16,6 +16,7 @@
         <jna.version>5.19.1</jna.version>
         <junit.version>5.11.4</junit.version>
         <spotless.version>2.30.0</spotless.version>
+        <google-java-format.version>1.7</google-java-format.version>
     </properties>
 
     <dependencies>
@@ -129,7 +130,7 @@
                 <configuration>
                     <java>
                         <googleJavaFormat>
-                            <version>1.7</version>
+                            <version>${google-java-format.version}</version>
                             <style>AOSP</style>
                         </googleJavaFormat>
                         <removeUnusedImports/>
@@ -200,4 +201,17 @@
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <profile>
+            <id>modern-build-jdk</id>
+            <activation>
+                <jdk>[11,)</jdk>
+            </activation>
+            <properties>
+                <spotless.version>2.46.1</spotless.version>
+                <google-java-format.version>1.22.0</google-java-format.version>
+            </properties>
+        </profile>
+    </profiles>
 </project>

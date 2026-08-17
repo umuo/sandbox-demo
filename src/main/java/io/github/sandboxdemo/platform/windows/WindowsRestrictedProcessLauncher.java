@@ -13,8 +13,10 @@ import com.sun.jna.ptr.IntByReference;
 import com.sun.jna.ptr.PointerByReference;
 import io.github.sandboxdemo.api.SandboxException;
 import io.github.sandboxdemo.api.SandboxResult;
+import io.github.sandboxdemo.core.OutputCallbacks;
 import io.github.sandboxdemo.core.ValidatedPolicy;
 import java.io.ByteArrayOutputStream;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -88,6 +90,101 @@ final class WindowsRestrictedProcessLauncher {
             Map<String, String> environment,
             List<String> capabilitySids,
             boolean allowUserProfileWrites)
+            throws SandboxException, InterruptedException {
+        return execute(
+                executable,
+                arguments,
+                standardInput,
+                policy,
+                environment,
+                capabilitySids,
+                allowUserProfileWrites,
+                null,
+                null,
+                null,
+                null,
+                StandardCharsets.UTF_8,
+                StandardCharsets.UTF_8,
+                false,
+                false);
+    }
+
+    static SandboxResult execute(
+            Path executable,
+            List<String> arguments,
+            byte[] standardInput,
+            ValidatedPolicy policy,
+            Map<String, String> environment,
+            List<String> capabilitySids,
+            boolean allowUserProfileWrites,
+            java.util.function.Consumer<byte[]> stdoutConsumer,
+            java.util.function.Consumer<byte[]> stderrConsumer)
+            throws SandboxException, InterruptedException {
+        return execute(
+                executable,
+                arguments,
+                standardInput,
+                policy,
+                environment,
+                capabilitySids,
+                allowUserProfileWrites,
+                stdoutConsumer,
+                stderrConsumer,
+                null,
+                null,
+                StandardCharsets.UTF_8,
+                StandardCharsets.UTF_8,
+                false,
+                false);
+    }
+
+    static SandboxResult execute(
+            Path executable,
+            List<String> arguments,
+            byte[] standardInput,
+            ValidatedPolicy policy,
+            Map<String, String> environment,
+            List<String> capabilitySids,
+            boolean allowUserProfileWrites,
+            java.util.function.Consumer<byte[]> stdoutConsumer,
+            java.util.function.Consumer<byte[]> stderrConsumer,
+            java.util.function.Consumer<String> stdoutTextConsumer,
+            java.util.function.Consumer<String> stderrTextConsumer)
+            throws SandboxException, InterruptedException {
+        return execute(
+                executable,
+                arguments,
+                standardInput,
+                policy,
+                environment,
+                capabilitySids,
+                allowUserProfileWrites,
+                stdoutConsumer,
+                stderrConsumer,
+                stdoutTextConsumer,
+                stderrTextConsumer,
+                StandardCharsets.UTF_8,
+                StandardCharsets.UTF_8,
+                false,
+                false);
+    }
+
+    static SandboxResult execute(
+            Path executable,
+            List<String> arguments,
+            byte[] standardInput,
+            ValidatedPolicy policy,
+            Map<String, String> environment,
+            List<String> capabilitySids,
+            boolean allowUserProfileWrites,
+            java.util.function.Consumer<byte[]> stdoutConsumer,
+            java.util.function.Consumer<byte[]> stderrConsumer,
+            java.util.function.Consumer<String> stdoutTextConsumer,
+            java.util.function.Consumer<String> stderrTextConsumer,
+            Charset stdoutCharset,
+            Charset stderrCharset,
+            boolean stdoutCharsetAuto,
+            boolean stderrCharsetAuto)
             throws SandboxException, InterruptedException {
 
         long started = System.nanoTime();
@@ -208,9 +305,25 @@ final class WindowsRestrictedProcessLauncher {
                                 return thread;
                             });
             Future<CapturedOutput> stdoutTask =
-                    readers.submit(() -> readPipe(capturedStdout, policy.maxOutputBytes()));
+                    readers.submit(
+                            () ->
+                                    readPipe(
+                                            capturedStdout,
+                                            policy.maxOutputBytes(),
+                                            stdoutConsumer,
+                                            stdoutTextConsumer,
+                                            stdoutCharset,
+                                            stdoutCharsetAuto));
             Future<CapturedOutput> stderrTask =
-                    readers.submit(() -> readPipe(capturedStderr, policy.maxOutputBytes()));
+                    readers.submit(
+                            () ->
+                                    readPipe(
+                                            capturedStderr,
+                                            policy.maxOutputBytes(),
+                                            stderrConsumer,
+                                            stderrTextConsumer,
+                                            stderrCharset,
+                                            stderrCharsetAuto));
             Pointer capturedStdin = stdinWrite.get();
             Future<?> inputTask =
                     readers.submit(
@@ -753,30 +866,44 @@ final class WindowsRestrictedProcessLauncher {
         }
     }
 
-    private static CapturedOutput readPipe(Pointer pipe, int limit) throws SandboxException {
+    private static CapturedOutput readPipe(
+            Pointer pipe,
+            int limit,
+            java.util.function.Consumer<byte[]> byteConsumer,
+            java.util.function.Consumer<String> textConsumer,
+            Charset charset,
+            boolean autoDetect)
+            throws SandboxException {
         ByteArrayOutputStream output = new ByteArrayOutputStream(Math.min(limit, 8192));
         byte[] buffer = new byte[8192];
         boolean truncated = false;
-        while (true) {
-            IntByReference read = new IntByReference();
-            if (!Kernel32.INSTANCE.ReadFile(pipe, buffer, buffer.length, read, null)) {
-                int error = Native.getLastError();
-                if (error == ERROR_BROKEN_PIPE) {
+        OutputCallbacks callbacks =
+                new OutputCallbacks(byteConsumer, textConsumer, charset, autoDetect);
+        try {
+            while (true) {
+                IntByReference read = new IntByReference();
+                if (!Kernel32.INSTANCE.ReadFile(pipe, buffer, buffer.length, read, null)) {
+                    int error = Native.getLastError();
+                    if (error == ERROR_BROKEN_PIPE) {
+                        break;
+                    }
+                    throw new SandboxException("ReadFile(pipe) failed, Win32=" + error);
+                }
+                int count = read.getValue();
+                if (count == 0) {
                     break;
                 }
-                throw new SandboxException("ReadFile(pipe) failed, Win32=" + error);
+                callbacks.accept(java.util.Arrays.copyOf(buffer, count));
+                int remaining = limit - output.size();
+                if (remaining > 0) {
+                    output.write(buffer, 0, Math.min(remaining, count));
+                }
+                if (count > remaining) {
+                    truncated = true;
+                }
             }
-            int count = read.getValue();
-            if (count == 0) {
-                break;
-            }
-            int remaining = limit - output.size();
-            if (remaining > 0) {
-                output.write(buffer, 0, Math.min(remaining, count));
-            }
-            if (count > remaining) {
-                truncated = true;
-            }
+        } finally {
+            callbacks.complete();
         }
         return new CapturedOutput(output.toByteArray(), truncated);
     }

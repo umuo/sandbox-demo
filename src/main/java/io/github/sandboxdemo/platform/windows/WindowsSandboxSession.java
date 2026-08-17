@@ -25,12 +25,16 @@ final class WindowsSandboxSession implements AutoCloseable {
     private final Path directory;
     private final Path requestFile;
     private final Path resultFile;
+    private final Path stdoutStreamFile;
+    private final Path stderrStreamFile;
     private Pointer sealedRequestHandle;
 
     private WindowsSandboxSession(Path directory) {
         this.directory = directory;
         this.requestFile = directory.resolve("request.bin");
         this.resultFile = directory.resolve("result.bin");
+        this.stdoutStreamFile = directory.resolve("stdout.stream");
+        this.stderrStreamFile = directory.resolve("stderr.stream");
     }
 
     static WindowsSandboxSession create(Path home, String sandboxUserSid)
@@ -57,6 +61,14 @@ final class WindowsSandboxSession implements AutoCloseable {
 
     Path resultFile() {
         return resultFile;
+    }
+
+    Path stdoutStreamFile() {
+        return stdoutStreamFile;
+    }
+
+    Path stderrStreamFile() {
+        return stderrStreamFile;
     }
 
     void sealRequest(String sandboxUserSid) throws SandboxException {

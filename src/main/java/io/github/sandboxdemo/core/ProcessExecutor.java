@@ -3,6 +3,8 @@ package io.github.sandboxdemo.core;
 import io.github.sandboxdemo.api.SandboxException;
 import io.github.sandboxdemo.api.SandboxResult;
 import java.io.IOException;
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -28,6 +30,71 @@ public final class ProcessExecutor {
             Map<String, String> environment,
             byte[] standardInput)
             throws SandboxException, InterruptedException {
+        return execute(command, policy, environment, standardInput, null, null, null, null);
+    }
+
+    public static SandboxResult execute(
+            List<String> command,
+            ValidatedPolicy policy,
+            Map<String, String> environment,
+            byte[] standardInput,
+            java.util.function.Consumer<byte[]> stdoutConsumer,
+            java.util.function.Consumer<byte[]> stderrConsumer)
+            throws SandboxException, InterruptedException {
+        return execute(
+                command,
+                policy,
+                environment,
+                standardInput,
+                stdoutConsumer,
+                stderrConsumer,
+                null,
+                null,
+                StandardCharsets.UTF_8,
+                StandardCharsets.UTF_8,
+                false,
+                false);
+    }
+
+    public static SandboxResult execute(
+            List<String> command,
+            ValidatedPolicy policy,
+            Map<String, String> environment,
+            byte[] standardInput,
+            java.util.function.Consumer<byte[]> stdoutConsumer,
+            java.util.function.Consumer<byte[]> stderrConsumer,
+            java.util.function.Consumer<String> stdoutTextConsumer,
+            java.util.function.Consumer<String> stderrTextConsumer)
+            throws SandboxException, InterruptedException {
+        return execute(
+                command,
+                policy,
+                environment,
+                standardInput,
+                stdoutConsumer,
+                stderrConsumer,
+                stdoutTextConsumer,
+                stderrTextConsumer,
+                StandardCharsets.UTF_8,
+                StandardCharsets.UTF_8,
+                false,
+                false);
+    }
+
+    public static SandboxResult execute(
+            List<String> command,
+            ValidatedPolicy policy,
+            Map<String, String> environment,
+            byte[] standardInput,
+            java.util.function.Consumer<byte[]> stdoutConsumer,
+            java.util.function.Consumer<byte[]> stderrConsumer,
+            java.util.function.Consumer<String> stdoutTextConsumer,
+            java.util.function.Consumer<String> stderrTextConsumer,
+            Charset stdoutCharset,
+            Charset stderrCharset,
+            boolean stdoutCharsetAuto,
+            boolean stderrCharsetAuto)
+            throws SandboxException, InterruptedException {
 
         long started = System.nanoTime();
         ProcessBuilder builder = new ProcessBuilder(command);
@@ -50,8 +117,20 @@ public final class ProcessExecutor {
                             thread.setDaemon(true);
                             return thread;
                         });
-        LimitedOutput stdout = new LimitedOutput(policy.maxOutputBytes());
-        LimitedOutput stderr = new LimitedOutput(policy.maxOutputBytes());
+        LimitedOutput stdout =
+                new LimitedOutput(
+                        policy.maxOutputBytes(),
+                        stdoutConsumer,
+                        stdoutTextConsumer,
+                        stdoutCharset,
+                        stdoutCharsetAuto);
+        LimitedOutput stderr =
+                new LimitedOutput(
+                        policy.maxOutputBytes(),
+                        stderrConsumer,
+                        stderrTextConsumer,
+                        stderrCharset,
+                        stderrCharsetAuto);
         Future<?> stdoutTask =
                 readers.submit(
                         () -> {

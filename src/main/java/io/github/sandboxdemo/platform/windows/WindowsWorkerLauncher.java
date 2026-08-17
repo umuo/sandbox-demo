@@ -10,11 +10,23 @@ import com.sun.jna.WString;
 import com.sun.jna.ptr.IntByReference;
 import io.github.sandboxdemo.api.SandboxException;
 import io.github.sandboxdemo.api.SandboxResult;
+import io.github.sandboxdemo.core.OutputCallbacks;
 import io.github.sandboxdemo.core.ValidatedPolicy;
+import java.io.IOException;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /** Starts the trusted Java worker under a dedicated Windows local account. */
 final class WindowsWorkerLauncher {
@@ -37,6 +49,35 @@ final class WindowsWorkerLauncher {
             WindowsSandboxSession session,
             ValidatedPolicy policy)
             throws SandboxException, InterruptedException {
+        return execute(
+                credential,
+                runtime,
+                session,
+                policy,
+                null,
+                null,
+                null,
+                null,
+                StandardCharsets.UTF_8,
+                StandardCharsets.UTF_8,
+                false,
+                false);
+    }
+
+    static SandboxResult execute(
+            WindowsSandboxInstallation.Credential credential,
+            WindowsWorkerRuntime runtime,
+            WindowsSandboxSession session,
+            ValidatedPolicy policy,
+            java.util.function.Consumer<byte[]> stdoutConsumer,
+            java.util.function.Consumer<byte[]> stderrConsumer,
+            java.util.function.Consumer<String> stdoutTextConsumer,
+            java.util.function.Consumer<String> stderrTextConsumer,
+            Charset stdoutCharset,
+            Charset stderrCharset,
+            boolean stdoutCharsetAuto,
+            boolean stderrCharsetAuto)
+            throws SandboxException, InterruptedException {
 
         List<String> workerArguments =
                 io.github.sandboxdemo.core.Java8.listOf(
@@ -44,7 +85,14 @@ final class WindowsWorkerLauncher {
                         runtime.classPathArgument(),
                         WindowsSandboxWorker.class.getName(),
                         session.requestFile().toString(),
-                        session.resultFile().toString());
+                        session.resultFile().toString(),
+                        session.stdoutStreamFile().toString(),
+                        session.stderrStreamFile().toString(),
+                        Boolean.toString(
+                                stdoutConsumer != null
+                                        || stderrConsumer != null
+                                        || stdoutTextConsumer != null
+                                        || stderrTextConsumer != null));
         String commandLine =
                 WindowsCommandLine.build(runtime.javaExecutable().toString(), workerArguments);
         Memory commandLineMemory = WindowsNative.wideString(commandLine);
@@ -54,6 +102,41 @@ final class WindowsWorkerLauncher {
         startup.write();
         WindowsNative.PROCESS_INFORMATION process = new WindowsNative.PROCESS_INFORMATION();
         Pointer job = createKillOnCloseJob();
+        AtomicBoolean streamingComplete = new AtomicBoolean();
+        ExecutorService streamReaders =
+                Executors.newFixedThreadPool(
+                        2,
+                        runnable -> {
+                            Thread thread = new Thread(runnable, "windows-worker-stream-reader");
+                            thread.setDaemon(true);
+                            return thread;
+                        });
+        Future<?> stdoutTask =
+                streamReaders.submit(
+                        () -> {
+                            streamFile(
+                                    session.stdoutStreamFile(),
+                                    new OutputCallbacks(
+                                            stdoutConsumer,
+                                            stdoutTextConsumer,
+                                            stdoutCharset,
+                                            stdoutCharsetAuto),
+                                    streamingComplete);
+                            return null;
+                        });
+        Future<?> stderrTask =
+                streamReaders.submit(
+                        () -> {
+                            streamFile(
+                                    session.stderrStreamFile(),
+                                    new OutputCallbacks(
+                                            stderrConsumer,
+                                            stderrTextConsumer,
+                                            stderrCharset,
+                                            stderrCharsetAuto),
+                                    streamingComplete);
+                            return null;
+                        });
 
         try {
             boolean created =
@@ -117,14 +200,50 @@ final class WindowsWorkerLauncher {
                                 + exitCode.getValue()
                                 + " without a result file");
             }
+            streamingComplete.set(true);
+            awaitStream(stdoutTask);
+            awaitStream(stderrTask);
             return WindowsWorkerProtocol.readResult(session.resultFile());
         } finally {
+            streamingComplete.set(true);
+            streamReaders.shutdownNow();
             if (job != null) {
                 Kernel32.INSTANCE.TerminateJobObject(job, 125);
             }
             close(process.hThread);
             close(process.hProcess);
             close(job);
+        }
+    }
+
+    static void streamFile(Path file, OutputCallbacks callbacks, AtomicBoolean streamingComplete)
+            throws IOException, InterruptedException {
+        try {
+            while (true) {
+                if (Files.isRegularFile(file)) {
+                    byte[] chunk = Files.readAllBytes(file);
+                    callbacks.accept(chunk);
+                    Files.delete(file);
+                    continue;
+                }
+                if (streamingComplete.get()) {
+                    return;
+                }
+                Thread.sleep(10);
+            }
+        } finally {
+            callbacks.complete();
+        }
+    }
+
+    private static void awaitStream(Future<?> task) throws SandboxException, InterruptedException {
+        try {
+            task.get(5, TimeUnit.SECONDS);
+        } catch (ExecutionException e) {
+            throw new SandboxException("failed while reading Windows worker output", e.getCause());
+        } catch (TimeoutException e) {
+            task.cancel(true);
+            throw new SandboxException("Windows worker output callback did not complete", e);
         }
     }
 

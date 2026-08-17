@@ -186,7 +186,19 @@ public final class LinuxBubblewrapSandboxRunner implements SandboxRunner {
             command.add(seccompFilter.toString());
             command.addAll(sandboxCommand);
             SandboxResult result =
-                    ProcessExecutor.execute(command, policy, environment, request.standardInput());
+                    ProcessExecutor.execute(
+                            command,
+                            policy,
+                            environment,
+                            request.standardInput(),
+                            request.stdoutConsumer(),
+                            request.stderrConsumer(),
+                            request.stdoutTextConsumer(),
+                            request.stderrTextConsumer(),
+                            request.stdoutCharset(),
+                            request.stderrCharset(),
+                            request.stdoutCharsetAuto(),
+                            request.stderrCharsetAuto());
             if (isBubblewrapBootstrapFailure(result)) {
                 throw new SandboxBackendUnavailableException(
                         "bubblewrap is installed but the host refused its namespace setup: "

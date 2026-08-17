@@ -108,7 +108,19 @@ public final class MacOsSeatbeltSandboxRunner implements SandboxRunner {
             command.add(executable.toString());
             command.addAll(request.command().arguments());
             SandboxResult result =
-                    ProcessExecutor.execute(command, policy, environment, request.standardInput());
+                    ProcessExecutor.execute(
+                            command,
+                            policy,
+                            environment,
+                            request.standardInput(),
+                            request.stdoutConsumer(),
+                            request.stderrConsumer(),
+                            request.stdoutTextConsumer(),
+                            request.stderrTextConsumer(),
+                            request.stdoutCharset(),
+                            request.stderrCharset(),
+                            request.stdoutCharsetAuto(),
+                            request.stderrCharsetAuto());
             if (result.exitCode() == 71
                     && result.stderrUtf8().contains("sandbox_apply: Operation not permitted")) {
                 throw new SandboxBackendUnavailableException(
