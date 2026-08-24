@@ -54,6 +54,7 @@ requirements-docs.txt
 docs/
 ├── index.md
 ├── architecture.md
+├── implementation-and-permission-granularity.md
 ├── policy-model.md
 ├── platforms/
 │   ├── windows.md

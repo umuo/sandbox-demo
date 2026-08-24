@@ -57,10 +57,11 @@ Windows Builder 自动使用 `ReadPolicy.HOST + NetworkPolicy.ALLOW`，默认不
 ## 阅读路线
 
 1. [总体架构](architecture.md)：理解信任边界、执行链和设计模式。
-2. [策略模型](policy-model.md)：理解每一个 `SandboxRequest` 字段。
-3. 选择对应平台：[Windows](platforms/windows.md)、[Linux](platforms/linux.md) 或 [macOS](platforms/macos.md)。
-4. 上线前阅读 [安全边界与威胁模型](security-boundaries.md)。
-5. 遇到缩写或系统名词时查 [术语表](glossary.md)。
+2. [实现原理与权限控制粒度](implementation-and-permission-granularity.md)：从代码路径理解三端实现与当前真实能力。
+3. [策略模型](policy-model.md)：理解每一个 `SandboxRequest` 字段。
+4. 选择对应平台：[Windows](platforms/windows.md)、[Linux](platforms/linux.md) 或 [macOS](platforms/macos.md)。
+5. 上线前阅读 [安全边界与威胁模型](security-boundaries.md)。
+6. 遇到缩写或系统名词时查 [术语表](glossary.md)。
 
 ## 非目标
 

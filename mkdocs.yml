@@ -37,6 +37,7 @@ nav:
   - 首页: index.md
   - 核心设计:
       - 总体架构: architecture.md
+      - 实现原理与权限粒度: implementation-and-permission-granularity.md
       - 策略模型: policy-model.md
   - 平台实现:
       - Windows: platforms/windows.md
