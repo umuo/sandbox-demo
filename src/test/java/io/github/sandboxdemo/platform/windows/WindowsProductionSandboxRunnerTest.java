@@ -196,19 +196,11 @@ class WindowsProductionSandboxRunnerTest {
         SandboxResult blockedDelete =
                 runner.execute(
                         SandboxRequest.of(
-                                policy,
-                                powershell(
-                                        "$ErrorActionPreference='Stop';Remove-Item -LiteralPath '"
-                                                + quote(readOnlyDeleteTarget)
-                                                + "' -Force")));
+                                policy, cmd("del /f /q \"" + readOnlyDeleteTarget + "\"")));
         SandboxResult allowedDelete =
                 runner.execute(
                         SandboxRequest.of(
-                                policy,
-                                powershell(
-                                        "$ErrorActionPreference='Stop';Remove-Item -LiteralPath '"
-                                                + quote(writableDeleteTarget)
-                                                + "' -Force")));
+                                policy, cmd("del /f /q \"" + writableDeleteTarget + "\"")));
 
         assertSuccessful(allowedResult);
         assertTrue(Files.exists(allowed));
@@ -246,10 +238,6 @@ class WindowsProductionSandboxRunnerTest {
                 "-NonInteractive",
                 "-Command",
                 command);
-    }
-
-    private static String quote(Path path) {
-        return path.toString().replace("'", "''");
     }
 
     private static void assertSuccessful(SandboxResult result) {
