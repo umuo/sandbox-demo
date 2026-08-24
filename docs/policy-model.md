@@ -77,7 +77,7 @@ workspace/src             RW
 workspace/.git            R
 ```
 
-Linux 用只读 bind mount 覆盖，macOS 发出 `deny file-write*`，Windows 给 capability SID 增加 deny write/delete ACE。
+Linux 用只读 bind mount 覆盖，macOS 发出 `deny file-write*`，Windows 给 capability SID 增加 deny write ACE，并给正常执行 SID 增加 deny delete ACE。
 
 ### 路径优先级
 
@@ -131,7 +131,7 @@ ALLOW 不会绕过宿主 Firewall、企业策略、路由、TLS 或应用认证�
 ### `DeletionPolicy.DENY`
 
 当前由 Windows 后端强制执行。SDK 给随机 capability SID 授予不包含 `DELETE` 的写权限，
-并显式拒绝 `DELETE | FILE_DELETE_CHILD`，因此仍可新建或原地覆盖文件，但 `DeleteFile`、
+并对正常执行 SID 显式拒绝 `DELETE | FILE_DELETE_CHILD`，因此仍可新建或原地覆盖文件，但 `DeleteFile`、
 `Remove-Item`、目录删除和通常的重命名会失败。Linux 的 bind mount 不能把“创建”与
 “删除”拆开，macOS 后端当前也不声明该能力；两者会在运行命令前失败关闭。
 

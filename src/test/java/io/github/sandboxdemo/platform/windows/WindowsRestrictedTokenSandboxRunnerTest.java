@@ -61,6 +61,8 @@ class WindowsRestrictedTokenSandboxRunnerTest {
         Path workspace = Files.createDirectory(root.resolve("no-delete-workspace"));
         Path existing = Files.write(workspace.resolve("existing.txt"), new byte[] {1});
         Path created = workspace.resolve("created.txt");
+        Path powershellTarget =
+                Files.write(workspace.resolve("powershell-target.txt"), new byte[] {2});
         Path renamed = workspace.resolve("renamed.txt");
         SandboxPolicy policy =
                 SandboxPolicy.builder(workspace).deletion(DeletionPolicy.DENY).build();
@@ -91,6 +93,60 @@ class WindowsRestrictedTokenSandboxRunnerTest {
         assertFalse(renameResult.successful());
         assertTrue(Files.exists(existing));
         assertFalse(Files.exists(renamed));
+
+        SandboxResult powershellDeleteResult =
+                runner.execute(
+                        SandboxRequest.of(
+                                policy,
+                                powershell(
+                                        "$ErrorActionPreference='Stop';Remove-Item -LiteralPath '"
+                                                + quote(powershellTarget)
+                                                + "' -Force")));
+        assertFalse(powershellDeleteResult.successful());
+        assertTrue(Files.exists(powershellTarget));
+    }
+
+    @Test
+    void readOnlyWorkingDirectoryBlocksDeletionButNestedWritableRootAllowsIt() throws Exception {
+        Path workspace = Files.createDirectory(root.resolve("read-only-workspace"));
+        Path readOnlyFile = Files.write(workspace.resolve("keep.txt"), new byte[] {1});
+        Path powershellTarget =
+                Files.write(workspace.resolve("keep-powershell.txt"), new byte[] {2});
+        Path writable = Files.createDirectories(workspace.resolve("generated/output"));
+        Path writableFile = Files.write(writable.resolve("delete-me.txt"), new byte[] {3});
+        SandboxPolicy policy =
+                SandboxPolicy.builder(workspace)
+                        .readOnlyWorkingDirectory()
+                        .writableRoot(writable)
+                        .build();
+        WindowsRestrictedTokenSandboxRunner runner = new WindowsRestrictedTokenSandboxRunner();
+
+        SandboxResult cmdDelete =
+                runner.execute(
+                        SandboxRequest.of(policy, cmd("del /f /q \"" + readOnlyFile + "\"")));
+        assertFalse(cmdDelete.successful(), failureDetails(cmdDelete));
+        assertTrue(Files.exists(readOnlyFile));
+
+        SandboxResult powershellDelete =
+                runner.execute(
+                        SandboxRequest.of(
+                                policy,
+                                powershell(
+                                        "$ErrorActionPreference='Stop';Remove-Item -LiteralPath '"
+                                                + quote(powershellTarget)
+                                                + "' -Force")));
+        assertFalse(powershellDelete.successful(), failureDetails(powershellDelete));
+        assertTrue(Files.exists(powershellTarget));
+
+        SandboxResult writableDelete =
+                runner.execute(
+                        SandboxRequest.of(policy, cmd("del /f /q \"" + writableFile + "\"")));
+        assertTrue(writableDelete.successful(), failureDetails(writableDelete));
+        assertFalse(Files.exists(writableFile));
+
+        // The request lease must restore the caller's original DACL and inheritance state.
+        Files.delete(readOnlyFile);
+        Files.delete(powershellTarget);
     }
 
     private static CommandSpec cmdWrite(Path target) {
@@ -105,6 +161,27 @@ class WindowsRestrictedTokenSandboxRunnerTest {
                 "/s",
                 "/c",
                 command);
+    }
+
+    private static CommandSpec powershell(String command) {
+        String systemRoot = System.getenv().getOrDefault("SystemRoot", "C:\\Windows");
+        return CommandSpec.of(
+                java.nio.file.Paths.get(
+                                systemRoot,
+                                "System32",
+                                "WindowsPowerShell",
+                                "v1.0",
+                                "powershell.exe")
+                        .toString(),
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                command);
+    }
+
+    private static String quote(Path path) {
+        return path.toString().replace("'", "''");
     }
 
     private static String failureDetails(SandboxResult result) {

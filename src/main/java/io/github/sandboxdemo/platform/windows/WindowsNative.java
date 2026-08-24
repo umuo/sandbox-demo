@@ -9,6 +9,7 @@ import com.sun.jna.platform.win32.BaseTSD;
 import com.sun.jna.ptr.ByReference;
 import com.sun.jna.ptr.IntByReference;
 import com.sun.jna.ptr.PointerByReference;
+import com.sun.jna.ptr.ShortByReference;
 import com.sun.jna.win32.StdCallLibrary;
 import com.sun.jna.win32.W32APIOptions;
 
@@ -115,6 +116,9 @@ final class WindowsNative {
         boolean ConvertStringSidToSidW(WString stringSid, PointerByReference sid);
 
         boolean ConvertSidToStringSidW(Pointer sid, PointerByReference stringSid);
+
+        boolean GetSecurityDescriptorControl(
+                Pointer securityDescriptor, ShortByReference control, IntByReference revision);
 
         boolean ConvertStringSecurityDescriptorToSecurityDescriptorW(
                 WString stringSecurityDescriptor,

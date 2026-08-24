@@ -118,10 +118,16 @@ flowchart TD
 不对应真实登录用户的随机 synthetic SID。它被同时放到：
 
 1. 当前 writable root 的 Allow ACE；默认包含 Modify，`DeletionPolicy.DENY` 时移除
-   `DELETE` 并增加 `DELETE | FILE_DELETE_CHILD` Deny；
+   `DELETE`；删除拒绝另行施加到正常执行 SID，确保 Windows 的独立 `DELETE` 访问检查也被覆盖；
 2. 当前 restricted token 的 restricting SID 列表。
 
 这形成一种短期“写能力票据”。旧 workspace 的 capability SID 不会被新请求复用，因此旧 ACL 即使异常残留也没有活跃 token 可以使用。
+
+`readOnlyWorkingDirectory()`、protected path 和 `DeletionPolicy.DENY` 还会为实际执行用户添加
+临时、可继承的 `DELETE | FILE_DELETE_CHILD` Deny。只读父目录下显式开放的 writable root
+会暂时阻断父 DACL 继承，避免在 `DeletionPolicy.ALLOW` 时误伤其内部删除；执行结束后 SDK
+按父到子的顺序恢复原始 DACL 和继承状态。由于恢复依赖精确快照，Windows ACL lease 在一次
+命令期间持有跨进程 mutex，重叠的 Windows 请求会串行执行而不会用旧快照覆盖彼此。
 
 ### ACL、DACL 与 ACE
 

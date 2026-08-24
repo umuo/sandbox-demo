@@ -169,6 +169,9 @@ class WindowsProductionSandboxRunnerTest {
                 readableAppData.resolve("input.txt"), "read-ok");
         Path blocked = project.resolve("blocked.txt");
         Path allowed = writableTests.resolve("allowed.txt");
+        Path readOnlyDeleteTarget = Files.write(project.resolve("keep.txt"), new byte[] {1});
+        Path writableDeleteTarget =
+                Files.write(writableTests.resolve("delete-me.txt"), new byte[] {2});
 
         SandboxPolicy policy =
                 SandboxPolicy.builder(project)
@@ -190,6 +193,22 @@ class WindowsProductionSandboxRunnerTest {
                         SandboxRequest.of(
                                 policy,
                                 cmd("type \"" + readableAppData.resolve("input.txt") + "\"")));
+        SandboxResult blockedDelete =
+                runner.execute(
+                        SandboxRequest.of(
+                                policy,
+                                powershell(
+                                        "$ErrorActionPreference='Stop';Remove-Item -LiteralPath '"
+                                                + quote(readOnlyDeleteTarget)
+                                                + "' -Force")));
+        SandboxResult allowedDelete =
+                runner.execute(
+                        SandboxRequest.of(
+                                policy,
+                                powershell(
+                                        "$ErrorActionPreference='Stop';Remove-Item -LiteralPath '"
+                                                + quote(writableDeleteTarget)
+                                                + "' -Force")));
 
         assertSuccessful(allowedResult);
         assertTrue(Files.exists(allowed));
@@ -197,6 +216,10 @@ class WindowsProductionSandboxRunnerTest {
         assertFalse(Files.exists(blocked));
         assertSuccessful(readResult);
         assertTrue(readResult.stdoutUtf8().contains("read-ok"));
+        assertFalse(blockedDelete.successful());
+        assertTrue(Files.exists(readOnlyDeleteTarget));
+        assertSuccessful(allowedDelete);
+        assertFalse(Files.exists(writableDeleteTarget));
     }
 
     private static CommandSpec cmd(String command) {
@@ -223,6 +246,10 @@ class WindowsProductionSandboxRunnerTest {
                 "-NonInteractive",
                 "-Command",
                 command);
+    }
+
+    private static String quote(Path path) {
+        return path.toString().replace("'", "''");
     }
 
     private static void assertSuccessful(SandboxResult result) {

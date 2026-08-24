@@ -5,20 +5,28 @@ import static io.github.sandboxdemo.platform.windows.WindowsNative.Kernel32;
 
 import com.sun.jna.Pointer;
 import com.sun.jna.WString;
+import com.sun.jna.ptr.IntByReference;
 import com.sun.jna.ptr.PointerByReference;
+import com.sun.jna.ptr.ShortByReference;
 import io.github.sandboxdemo.api.DeletionPolicy;
 import io.github.sandboxdemo.api.SandboxException;
 import io.github.sandboxdemo.core.ValidatedPolicy;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /** Applies short-lived NTFS capability ACEs and removes them after execution. */
 final class WindowsAclManager {
 
     private static final int SE_FILE_OBJECT = 1;
     private static final int DACL_SECURITY_INFORMATION = 0x00000004;
+    private static final int PROTECTED_DACL_SECURITY_INFORMATION = 0x80000000;
+    private static final int UNPROTECTED_DACL_SECURITY_INFORMATION = 0x20000000;
+    private static final int SE_DACL_PROTECTED = 0x1000;
 
     private static final int GRANT_ACCESS = 1;
     private static final int DENY_ACCESS = 3;
@@ -78,9 +86,22 @@ final class WindowsAclManager {
 
     WindowsAclLease apply(ValidatedPolicy policy, List<String> sandboxUserSids)
             throws SandboxException, InterruptedException {
+        // Temporary denies use an exact DACL snapshot for lossless restoration. Keep the
+        // cross-process ACL mutex for the lease lifetime so two overlapping requests cannot
+        // restore stale snapshots over one another. Windows mutexes are recursive, so the
+        // read/merge/write helpers below can continue taking the same lock defensively.
+        WindowsAclUpdateLock leaseLock = WindowsAclUpdateLock.acquire();
+        boolean lockTransferred = false;
         List<AclMutation> applied = new ArrayList<>();
+        Map<Path, DaclSnapshot> snapshots = new LinkedHashMap<>();
         List<String> capabilitySids = new ArrayList<>();
+        List<String> executionSids =
+                sandboxUserSids.isEmpty()
+                        ? io.github.sandboxdemo.core.Java8.listOf(currentUserSid())
+                        : io.github.sandboxdemo.core.Java8.copyList(sandboxUserSids);
         try {
+            // Dedicated-user read/write grants are persistent installation state. Apply them before
+            // taking temporary DACL snapshots so restoring a request lease retains those grants.
             for (Path readableRoot : policy.readableRoots()) {
                 boolean alreadyWritable =
                         policy.writableRoots().stream().anyMatch(readableRoot::startsWith);
@@ -93,11 +114,32 @@ final class WindowsAclManager {
                 }
             }
             for (Path writableRoot : policy.writableRoots()) {
+                for (String userSid : sandboxUserSids) {
+                    recordPersistentGrant(writableRoot, userSid);
+                    grant(writableRoot, userSid, writeRights(policy.deletionPolicy()));
+                }
+            }
+
+            List<Path> readOnlyRoots = readOnlyRoots(policy);
+            if (policy.deletionPolicy() == DeletionPolicy.ALLOW) {
+                // A deny inherited from a read-only parent must not disable deletion inside an
+                // explicitly writable child. Protect the child DACL before the parent deny is
+                // propagated; the original inheritance state is restored with the request lease.
+                for (Path writableRoot : policy.writableRoots()) {
+                    if (readOnlyRoots.stream()
+                            .anyMatch(
+                                    readOnlyRoot ->
+                                            !writableRoot.equals(readOnlyRoot)
+                                                    && writableRoot.startsWith(readOnlyRoot))) {
+                        DaclSnapshot snapshot = snapshot(snapshots, writableRoot);
+                        snapshot.protect();
+                    }
+                }
+            }
+
+            for (Path writableRoot : policy.writableRoots()) {
                 String capabilitySid = WindowsCapabilitySid.random();
-                int writeRights =
-                        policy.deletionPolicy() == DeletionPolicy.DENY
-                                ? WRITE_WITHOUT_DELETE
-                                : WRITE_WITH_DELETE;
+                int writeRights = writeRights(policy.deletionPolicy());
                 grant(writableRoot, capabilitySid, writeRights);
                 applied.add(AclMutation.grant(writableRoot, capabilitySid));
                 if (policy.deletionPolicy() == DeletionPolicy.DENY) {
@@ -107,10 +149,25 @@ final class WindowsAclManager {
                     applied.add(AclMutation.deny(writableRoot, capabilitySid));
                 }
                 capabilitySids.add(capabilitySid);
+            }
 
-                for (String userSid : sandboxUserSids) {
-                    recordPersistentGrant(writableRoot, userSid);
-                    grant(writableRoot, userSid, writeRights);
+            // WRITE_RESTRICTED does not classify the standard DELETE right as FILE_GENERIC_WRITE.
+            // A deny against the normal execution identity is therefore required in addition to
+            // the capability-SID write check. It covers both DELETE on a child and
+            // FILE_DELETE_CHILD on its containing directory.
+            for (Path readOnlyRoot : readOnlyRoots) {
+                for (String executionSid : executionSids) {
+                    snapshot(snapshots, readOnlyRoot);
+                    deny(readOnlyRoot, executionSid, DENY_DELETE);
+                }
+            }
+
+            if (policy.deletionPolicy() == DeletionPolicy.DENY) {
+                for (Path writableRoot : policy.writableRoots()) {
+                    for (String executionSid : executionSids) {
+                        snapshot(snapshots, writableRoot);
+                        deny(writableRoot, executionSid, DENY_DELETE);
+                    }
                 }
             }
 
@@ -120,11 +177,79 @@ final class WindowsAclManager {
                     deny(protectedPath, capabilitySid, DENY_WRITE);
                     applied.add(AclMutation.deny(protectedPath, capabilitySid));
                 }
+                for (String executionSid : executionSids) {
+                    snapshot(snapshots, protectedPath);
+                    deny(protectedPath, executionSid, DENY_DELETE);
+                }
             }
-            return new WindowsAclLease(this, capabilitySids, applied);
+            WindowsAclLease lease =
+                    new WindowsAclLease(this, capabilitySids, applied, snapshots, leaseLock);
+            lockTransferred = true;
+            return lease;
         } catch (SandboxException e) {
-            rollback(applied);
+            rollback(applied, snapshots);
             throw e;
+        } catch (RuntimeException | Error e) {
+            rollback(applied, snapshots);
+            throw e;
+        } finally {
+            if (!lockTransferred) {
+                leaseLock.close();
+            }
+        }
+    }
+
+    private static int writeRights(DeletionPolicy policy) {
+        return policy == DeletionPolicy.DENY ? WRITE_WITHOUT_DELETE : WRITE_WITH_DELETE;
+    }
+
+    private static List<Path> readOnlyRoots(ValidatedPolicy policy) {
+        List<Path> candidates = new ArrayList<>();
+        for (Path readableRoot : policy.readableRoots()) {
+            boolean coveredByWritable =
+                    policy.writableRoots().stream().anyMatch(readableRoot::startsWith);
+            if (!coveredByWritable) {
+                candidates.add(readableRoot);
+            }
+        }
+
+        // An ancestor deny already covers its readable descendants. Keeping only minimal roots
+        // avoids redundant ACL propagation through the same tree.
+        candidates.sort(Comparator.comparingInt(Path::getNameCount));
+        List<Path> result = new ArrayList<>();
+        for (Path candidate : candidates) {
+            if (result.stream().noneMatch(candidate::startsWith)) {
+                result.add(candidate);
+            }
+        }
+        return result;
+    }
+
+    private static DaclSnapshot snapshot(Map<Path, DaclSnapshot> snapshots, Path path)
+            throws SandboxException {
+        DaclSnapshot existing = snapshots.get(path);
+        if (existing != null) {
+            return existing;
+        }
+        DaclSnapshot captured = DaclSnapshot.capture(path);
+        snapshots.put(path, captured);
+        return captured;
+    }
+
+    private static String currentUserSid() throws SandboxException {
+        com.sun.jna.platform.win32.WinNT.HANDLEByReference token =
+                new com.sun.jna.platform.win32.WinNT.HANDLEByReference();
+        if (!com.sun.jna.platform.win32.Advapi32.INSTANCE.OpenProcessToken(
+                com.sun.jna.platform.win32.Kernel32.INSTANCE.GetCurrentProcess(),
+                com.sun.jna.platform.win32.WinNT.TOKEN_QUERY,
+                token)) {
+            throw win32("OpenProcessToken(ACL identity)");
+        }
+        try {
+            return com.sun.jna.platform.win32.Advapi32Util.getTokenAccount(token.getValue())
+                    .sidString;
+        } finally {
+            com.sun.jna.platform.win32.Kernel32.INSTANCE.CloseHandle(token.getValue());
         }
     }
 
@@ -166,7 +291,7 @@ final class WindowsAclManager {
         return DENY_DELETE;
     }
 
-    private void rollback(List<AclMutation> mutations) {
+    private void rollback(List<AclMutation> mutations, Map<Path, DaclSnapshot> snapshots) {
         List<AclMutation> reverse = new ArrayList<>(mutations);
         Collections.reverse(reverse);
         for (AclMutation mutation : reverse) {
@@ -175,6 +300,20 @@ final class WindowsAclManager {
             } catch (Exception ignored) {
                 // A random capability SID left after a crash/rollback is inert because
                 // no subsequent restricted token reuses it.
+            }
+        }
+
+        // Restore ancestors before descendants. This removes propagated parent denies first, then
+        // reinstates each nested writable root's exact original DACL and inheritance state.
+        List<DaclSnapshot> ordered = new ArrayList<>(snapshots.values());
+        ordered.sort(Comparator.comparingInt(snapshot -> snapshot.path().getNameCount()));
+        for (DaclSnapshot snapshot : ordered) {
+            try {
+                snapshot.restore();
+            } catch (Exception ignored) {
+                // The deny never removes WRITE_DAC, so a later host recovery can restore the DACL.
+            } finally {
+                snapshot.close();
             }
         }
     }
@@ -318,15 +457,21 @@ final class WindowsAclManager {
         private final WindowsAclManager manager;
         private final List<String> capabilitySids;
         private final List<AclMutation> mutations;
+        private final Map<Path, DaclSnapshot> snapshots;
+        private final WindowsAclUpdateLock leaseLock;
         private boolean closed;
 
         private WindowsAclLease(
                 WindowsAclManager manager,
                 List<String> capabilitySids,
-                List<AclMutation> mutations) {
+                List<AclMutation> mutations,
+                Map<Path, DaclSnapshot> snapshots,
+                WindowsAclUpdateLock leaseLock) {
             this.manager = manager;
             this.capabilitySids = io.github.sandboxdemo.core.Java8.copyList(capabilitySids);
             this.mutations = io.github.sandboxdemo.core.Java8.copyList(mutations);
+            this.snapshots = new LinkedHashMap<>(snapshots);
+            this.leaseLock = leaseLock;
         }
 
         List<String> capabilitySids() {
@@ -337,7 +482,107 @@ final class WindowsAclManager {
         public void close() {
             if (!closed) {
                 closed = true;
-                manager.rollback(mutations);
+                try {
+                    manager.rollback(mutations, snapshots);
+                } finally {
+                    leaseLock.close();
+                }
+            }
+        }
+    }
+
+    /** Holds the original DACL allocation until the temporary policy mutation is restored. */
+    private static final class DaclSnapshot implements AutoCloseable {
+
+        private final Path path;
+        private final Pointer securityDescriptor;
+        private final Pointer dacl;
+        private final boolean protectedDacl;
+        private boolean closed;
+
+        private DaclSnapshot(
+                Path path, Pointer securityDescriptor, Pointer dacl, boolean protectedDacl) {
+            this.path = path;
+            this.securityDescriptor = securityDescriptor;
+            this.dacl = dacl;
+            this.protectedDacl = protectedDacl;
+        }
+
+        static DaclSnapshot capture(Path path) throws SandboxException {
+            PointerByReference dacl = new PointerByReference();
+            PointerByReference descriptor = new PointerByReference();
+            int getError =
+                    Advapi32.INSTANCE.GetNamedSecurityInfoW(
+                            new WString(path.toString()),
+                            SE_FILE_OBJECT,
+                            DACL_SECURITY_INFORMATION,
+                            null,
+                            null,
+                            dacl,
+                            null,
+                            descriptor);
+            if (getError != 0) {
+                throw windowsError("GetNamedSecurityInfoW(snapshot, " + path + ")", getError);
+            }
+            if (dacl.getValue() == null) {
+                Kernel32.INSTANCE.LocalFree(descriptor.getValue());
+                throw new SandboxException(
+                        "refusing to snapshot an object with a NULL DACL: " + path);
+            }
+
+            ShortByReference control = new ShortByReference();
+            IntByReference revision = new IntByReference();
+            if (!Advapi32.INSTANCE.GetSecurityDescriptorControl(
+                    descriptor.getValue(), control, revision)) {
+                int error = com.sun.jna.Native.getLastError();
+                Kernel32.INSTANCE.LocalFree(descriptor.getValue());
+                throw new SandboxException(
+                        "GetSecurityDescriptorControl(" + path + ") failed, Win32=" + error);
+            }
+            return new DaclSnapshot(
+                    path,
+                    descriptor.getValue(),
+                    dacl.getValue(),
+                    (Short.toUnsignedInt(control.getValue()) & SE_DACL_PROTECTED) != 0);
+        }
+
+        Path path() {
+            return path;
+        }
+
+        void protect() throws SandboxException {
+            if (!protectedDacl) {
+                set(PROTECTED_DACL_SECURITY_INFORMATION);
+            }
+        }
+
+        void restore() throws SandboxException {
+            set(
+                    protectedDacl
+                            ? PROTECTED_DACL_SECURITY_INFORMATION
+                            : UNPROTECTED_DACL_SECURITY_INFORMATION);
+        }
+
+        private void set(int protectionFlag) throws SandboxException {
+            int error =
+                    Advapi32.INSTANCE.SetNamedSecurityInfoW(
+                            new WString(path.toString()),
+                            SE_FILE_OBJECT,
+                            DACL_SECURITY_INFORMATION | protectionFlag,
+                            null,
+                            null,
+                            dacl,
+                            null);
+            if (error != 0) {
+                throw windowsError("SetNamedSecurityInfoW(snapshot, " + path + ")", error);
+            }
+        }
+
+        @Override
+        public void close() {
+            if (!closed) {
+                closed = true;
+                Kernel32.INSTANCE.LocalFree(securityDescriptor);
             }
         }
     }
