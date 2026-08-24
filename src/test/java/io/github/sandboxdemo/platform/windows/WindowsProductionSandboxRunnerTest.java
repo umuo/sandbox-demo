@@ -208,7 +208,9 @@ class WindowsProductionSandboxRunnerTest {
         assertFalse(Files.exists(blocked));
         assertSuccessful(readResult);
         assertTrue(readResult.stdoutUtf8().contains("read-ok"));
-        assertFalse(blockedDelete.successful());
+        // cmd.exe's DEL may still return exit code 0 after an access-denied diagnostic. The
+        // security assertion is that the target survived; also ensure the probe itself completed.
+        assertFalse(blockedDelete.timedOut());
         assertTrue(Files.exists(readOnlyDeleteTarget));
         assertSuccessful(allowedDelete);
         assertFalse(Files.exists(writableDeleteTarget));
