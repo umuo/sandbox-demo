@@ -67,9 +67,13 @@ class WindowsLifecycleIntegrationTest {
         logger.setLevel(java.util.logging.Level.FINE);
         ThreadPoolExecutor workers = pool();
         try {
+            // Fresh CI accounts can have slow first-logon/profile/ACL preparation.
+            // The cancellation bound below stays tied to the original two-second grace.
             SandboxExecution execution =
-                    client().start(request(Duration.ofSeconds(60), new byte[1024 * 1024]), workers);
-            long end = System.nanoTime() + TimeUnit.SECONDS.toNanos(40);
+                    client().start(
+                                    request(Duration.ofSeconds(120), new byte[1024 * 1024]),
+                                    workers);
+            long end = System.nanoTime() + TimeUnit.SECONDS.toNanos(90);
             while (!Files.exists(workspace.resolve("ready")) && end - System.nanoTime() > 0) {
                 Thread.sleep(20);
             }
@@ -87,7 +91,7 @@ class WindowsLifecycleIntegrationTest {
                                                                                     error
                                                                                             .debugMessage())
                                                                     .orElse(value.toString()))
-                                            .orElse("worker still preparing"));
+                                            .orElse("completion pending"));
             assertTrue(execution.cancel());
             assertEquals(
                     SandboxTerminationReason.CANCELLED,

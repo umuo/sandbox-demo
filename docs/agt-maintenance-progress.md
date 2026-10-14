@@ -102,3 +102,5 @@ SANDBOX_RUN_PLATFORM_INTEGRATION=1 SANDBOX_RUN_LIFECYCLE_INTEGRATION=1 mvn -Dtes
 首次推送 `03c97c9` 的 Actions #23：文档与 macOS Intel JDK 17/21 通过，其余 9 个测试任务失败。修复单元测试对宿主默认读取/联网策略的依赖；严格 profile 测试显式选用 DECLARED_ONLY。macOS 原生超时测试扩大启动预算并断言目标实际启动；Windows 普通验收扩大 worker 启动预算，短期限允许在启动阶段返回类型化 TIMEOUT，取消验收延长标记等待并补充诊断。Linux 原生验收选择 Ubuntu 22.04，先独立检查 bubblewrap namespace 可用性；宿主失败不能转换为跳过。
 
 本地 Zulu JDK 8 `mvn verify` 与 Zulu 17 完整 macOS 原生测试通过。远端矩阵结果以修复提交对应 Actions 为准；尚未确认通过时不视为跨平台验收完成。
+
+后续矩阵已确认 Linux JDK 8/17/21、macOS Intel JDK 8/17/21 与 ARM JDK 17/21 通过。Windows 原生回收修复：Job 已触发终止时，根进程 TerminateProcess 可能因并发退出而失败；继续在原宽限期内等待根进程句柄发出退出信号，避免过早报告 UNKNOWN（依据 [TerminateProcess](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-terminateprocess) 的异步终止语义）。`859f09b` 的 Windows JDK 8/21 通过，JDK 17 的取消测试等待启动标记 40 秒失败；调整原生验收的启动预算，取消后的两秒清理宽限期保持不变。最终完整矩阵仍以最新修复提交的 Actions 结果为准。
