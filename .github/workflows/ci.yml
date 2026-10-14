@@ -67,6 +67,15 @@ jobs:
           SANDBOX_WINDOWS_PRODUCTION_TEST: '1'
           SECRET_TEST_VALUE: abc123
         run: mvn --batch-mode --no-transfer-progress test
+      - name: Annotate Windows native cleanup failures
+        if: runner.os == 'Windows' && failure()
+        shell: pwsh
+        run: |
+          Get-ChildItem target/surefire-reports -Filter '*.xml' | ForEach-Object {
+            Select-String -Path $_.FullName -Pattern 'Win32=\d+' | ForEach-Object {
+              Write-Output "::error::$($_.Line.Trim())"
+            }
+          }
       - name: Compile external SDK consumer
         run: mvn --batch-mode --no-transfer-progress -f examples/sdk-consumer/pom.xml clean package
       - name: Upload test evidence

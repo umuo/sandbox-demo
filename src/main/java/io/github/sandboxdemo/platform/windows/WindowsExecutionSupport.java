@@ -94,8 +94,12 @@ final class WindowsExecutionSupport {
         if (Kernel32.INSTANCE.WaitForSingleObject(root, 0) == 0) {
             return SandboxCleanupState.CONFIRMED;
         }
-        if (!Kernel32.INSTANCE.TerminateProcess(root, 125)) {
-            return unknown("TerminateProcess");
+        boolean terminationRequested = Kernel32.INSTANCE.TerminateProcess(root, 125);
+        if (!terminationRequested) {
+            // Job termination can race this call: an exiting process may reject
+            // TerminateProcess before its handle becomes signalled. Only the wait
+            // proves reclamation; keep observing it within the same cleanup grace.
+            unknown("TerminateProcess");
         }
         while (context.cleanupRemainingNanos() > 0) {
             int wait =
@@ -115,7 +119,7 @@ final class WindowsExecutionSupport {
                 return unknown("WaitForSingleObject(root), status=" + wait);
             }
         }
-        return SandboxCleanupState.FAILED;
+        return terminationRequested ? SandboxCleanupState.FAILED : SandboxCleanupState.UNKNOWN;
     }
 
     static <T> T await(Future<T> future, ExecutionContext context)
