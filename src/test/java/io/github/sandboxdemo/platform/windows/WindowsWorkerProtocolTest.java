@@ -35,6 +35,11 @@ class WindowsWorkerProtocolTest {
                                 .readPolicy(ReadPolicy.HOST)
                                 .network(NetworkPolicy.DENY)
                                 .deletion(DeletionPolicy.DENY)
+                                .onOutputLimit(
+                                        io.github.sandboxdemo.api.OutputLimitAction.TERMINATE)
+                                .maxCombinedOutputBytes(19)
+                                .outputCallbackMode(
+                                        io.github.sandboxdemo.api.OutputCallbackMode.RETAINED)
                                 .timeout(Duration.ofSeconds(3))
                                 .build());
         try {
@@ -58,6 +63,10 @@ class WindowsWorkerProtocolTest {
             assertEquals(policy.readableRoots(), decoded.policy().readableRoots());
             assertEquals(policy.readPolicy(), decoded.policy().readPolicy());
             assertEquals(policy.deletionPolicy(), decoded.policy().deletionPolicy());
+            assertEquals(policy.onOutputLimit(), decoded.policy().onOutputLimit());
+            assertEquals(
+                    policy.maxCombinedOutputBytes(), decoded.policy().maxCombinedOutputBytes());
+            assertEquals(policy.outputCallbackMode(), decoded.policy().outputCallbackMode());
 
             Path resultFile = root.resolve("result.bin");
             SandboxResult result =
@@ -68,13 +77,20 @@ class WindowsWorkerProtocolTest {
                             new byte[] {3},
                             false,
                             true,
-                            Duration.ofMillis(9));
+                            Duration.ofMillis(9),
+                            true);
             WindowsWorkerProtocol.writeResult(resultFile, result, null);
             SandboxResult decodedResult = WindowsWorkerProtocol.readResult(resultFile);
             assertEquals(result.exitCode(), decodedResult.exitCode());
             assertArrayEquals(result.stdout(), decodedResult.stdout());
             assertArrayEquals(result.stderr(), decodedResult.stderr());
             assertEquals(result.stderrTruncated(), decodedResult.stderrTruncated());
+            assertEquals(result, decodedResult);
+            byte[] staleRequest = Files.readAllBytes(requestFile);
+            java.nio.ByteBuffer.wrap(staleRequest).putInt(4, 4);
+            Files.write(requestFile, staleRequest);
+            assertThrows(
+                    SandboxException.class, () -> WindowsWorkerProtocol.readRequest(requestFile));
         } finally {
             PathPolicyValidator.cleanup(policy);
         }

@@ -115,6 +115,12 @@ public final class SandboxClient {
     }
 
     private void validateCapabilities(SandboxPolicy policy) throws SandboxException {
+        if (!runner.supportsOutputPolicy(policy)) {
+            throw new SandboxBackendUnavailableException(
+                    SandboxErrorCode.POLICY_UNSUPPORTED,
+                    SandboxPhase.ADMISSION,
+                    "backend does not support requested output policy");
+        }
         if (!capabilities.supports(policy.readPolicy())) {
             throw new SandboxBackendUnavailableException(
                     SandboxErrorCode.POLICY_UNSUPPORTED,

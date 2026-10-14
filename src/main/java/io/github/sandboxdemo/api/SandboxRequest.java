@@ -438,6 +438,21 @@ public final class SandboxRequest {
             return this;
         }
 
+        public Builder onOutputLimit(OutputLimitAction action) {
+            policy.onOutputLimit(action);
+            return this;
+        }
+
+        public Builder maxCombinedOutputBytes(int bytes) {
+            policy.maxCombinedOutputBytes(bytes);
+            return this;
+        }
+
+        public Builder outputCallbackMode(OutputCallbackMode mode) {
+            policy.outputCallbackMode(mode);
+            return this;
+        }
+
         public Builder maxOutputBytes(int maxOutputBytes) {
             policy.maxOutputBytes(maxOutputBytes);
             return this;

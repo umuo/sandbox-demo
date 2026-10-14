@@ -27,6 +27,11 @@ public final class MacOsSeatbeltSandboxRunner implements SandboxRunner {
     private static final Path SANDBOX_EXEC = java.nio.file.Paths.get("/usr/bin/sandbox-exec");
 
     @Override
+    public boolean supportsOutputPolicy(io.github.sandboxdemo.api.SandboxPolicy policy) {
+        return true;
+    }
+
+    @Override
     public String backendName() {
         return "macos-seatbelt";
     }

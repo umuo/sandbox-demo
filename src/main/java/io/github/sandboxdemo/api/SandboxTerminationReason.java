@@ -5,5 +5,6 @@ public enum SandboxTerminationReason {
     EXITED,
     TIMEOUT,
     CANCELLED,
-    FAILED
+    FAILED,
+    OUTPUT_LIMIT
 }

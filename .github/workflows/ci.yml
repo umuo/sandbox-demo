@@ -36,6 +36,7 @@ jobs:
     env:
       SANDBOX_RUN_PLATFORM_INTEGRATION: '1'
       SANDBOX_RUN_LIFECYCLE_INTEGRATION: '1'
+      SANDBOX_RUN_OUTPUT_INTEGRATION: '1'
       # Modern macOS admission failures are failures, never successful skips.
       SANDBOX_MACOS_STRICT_ACCEPTANCE: ${{ startsWith(matrix.os, 'macos-') && matrix.java != '8' && '1' || '0' }}
     steps:

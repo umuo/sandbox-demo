@@ -26,7 +26,7 @@ final class WindowsWorkerProtocol {
 
     private static final int REQUEST_MAGIC = 0x53425851;
     private static final int RESULT_MAGIC = 0x53425852;
-    private static final int VERSION = 4;
+    private static final int VERSION = 5;
     private static final int MAX_STRING_BYTES = 1024 * 1024;
     private static final int MAX_BINARY_BYTES = 64 * 1024 * 1024;
     private static final int MAX_STANDARD_INPUT_BYTES = 8 * 1024 * 1024;
@@ -56,6 +56,9 @@ final class WindowsWorkerProtocol {
             output.writeLong(request.policy().timeout().toMillis());
             output.writeInt(request.policy().maxOutputBytes());
             output.writeBoolean(request.policy().allowPathSearch());
+            output.writeInt(request.policy().onOutputLimit().ordinal());
+            output.writeInt(request.policy().maxCombinedOutputBytes());
+            output.writeInt(request.policy().outputCallbackMode().ordinal());
             writeMap(output, request.environment());
             writeStrings(output, request.capabilitySids());
         } catch (IOException e) {
@@ -91,7 +94,21 @@ final class WindowsWorkerProtocol {
             long timeoutMillis = input.readLong();
             int maxOutputBytes = input.readInt();
             boolean allowPathSearch = input.readBoolean();
-            if (timeoutMillis < 1 || maxOutputBytes < 1) {
+            int action = input.readInt();
+            int combined = input.readInt();
+            int callback = input.readInt();
+            if (action < 0
+                    || action >= io.github.sandboxdemo.api.OutputLimitAction.values().length
+                    || callback < 0
+                    || callback >= io.github.sandboxdemo.api.OutputCallbackMode.values().length
+                    || combined < 0
+                    || combined > 128 * 1024 * 1024) {
+                throw new SandboxException("invalid output policy in Windows worker request");
+            }
+            if (timeoutMillis < 1
+                    || timeoutMillis > Duration.ofHours(24).toMillis()
+                    || maxOutputBytes < 1
+                    || maxOutputBytes > MAX_BINARY_BYTES) {
                 throw new SandboxException("invalid limits in Windows worker request");
             }
             Map<String, String> environment = readMap(input);
@@ -111,7 +128,10 @@ final class WindowsWorkerProtocol {
                             DeletionPolicy.values()[deletionOrdinal],
                             Duration.ofMillis(timeoutMillis),
                             maxOutputBytes,
-                            allowPathSearch);
+                            allowPathSearch,
+                            io.github.sandboxdemo.api.OutputLimitAction.values()[action],
+                            combined,
+                            io.github.sandboxdemo.api.OutputCallbackMode.values()[callback]);
             return new WorkerRequest(
                     expectedSid,
                     executable,
@@ -151,6 +171,7 @@ final class WindowsWorkerProtocol {
             output.writeBoolean(result.stdoutTruncated());
             output.writeBoolean(result.stderrTruncated());
             output.writeLong(result.duration().toNanos());
+            output.writeBoolean(result.outputLimitTerminated());
         } catch (IOException e) {
             throw new SandboxException("failed to write Windows worker result", e);
         }
@@ -177,7 +198,8 @@ final class WindowsWorkerProtocol {
                     stderr,
                     stdoutTruncated,
                     stderrTruncated,
-                    Duration.ofNanos(Math.max(0, durationNanos)));
+                    Duration.ofNanos(Math.max(0, durationNanos)),
+                    input.readBoolean());
         } catch (EOFException e) {
             throw new SandboxException("truncated Windows worker result", e);
         } catch (IOException e) {

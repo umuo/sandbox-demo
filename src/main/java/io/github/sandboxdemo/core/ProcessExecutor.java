@@ -165,20 +165,25 @@ public final class ProcessExecutor {
                             thread.setDaemon(true);
                             return thread;
                         });
+        OutputBudget budget = new OutputBudget(policy, context);
         LimitedOutput stdout =
                 new LimitedOutput(
                         policy.maxOutputBytes(),
                         stdoutConsumer,
                         stdoutTextConsumer,
                         stdoutCharset,
-                        stdoutCharsetAuto);
+                        stdoutCharsetAuto,
+                        budget,
+                        policy.outputCallbackMode());
         LimitedOutput stderr =
                 new LimitedOutput(
                         policy.maxOutputBytes(),
                         stderrConsumer,
                         stderrTextConsumer,
                         stderrCharset,
-                        stderrCharsetAuto);
+                        stderrCharsetAuto,
+                        budget,
+                        policy.outputCallbackMode());
         Future<?> outTask =
                 submitTracked(
                         readers,
@@ -368,7 +373,9 @@ public final class ProcessExecutor {
                 stderr.bytes(),
                 stdout.truncated(),
                 stderr.truncated(),
-                Duration.ofNanos(System.nanoTime() - started));
+                Duration.ofNanos(System.nanoTime() - started),
+                context.stopReason()
+                        == io.github.sandboxdemo.api.SandboxTerminationReason.OUTPUT_LIMIT);
     }
 
     private static Future<?> submitTracked(

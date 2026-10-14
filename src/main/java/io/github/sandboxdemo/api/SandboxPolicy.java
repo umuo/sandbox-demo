@@ -31,6 +31,9 @@ public final class SandboxPolicy {
     private final Duration timeout;
     private final int maxOutputBytes;
     private final boolean allowPathSearch;
+    private final OutputLimitAction onOutputLimit;
+    private final int maxCombinedOutputBytes;
+    private final OutputCallbackMode outputCallbackMode;
 
     private SandboxPolicy(Builder builder) {
         this.workingDirectory = normalize(builder.workingDirectory);
@@ -43,6 +46,13 @@ public final class SandboxPolicy {
         this.timeout = Objects.requireNonNull(builder.timeout, "timeout");
         this.maxOutputBytes = builder.maxOutputBytes;
         this.allowPathSearch = builder.allowPathSearch;
+        this.onOutputLimit = builder.onOutputLimit;
+        this.maxCombinedOutputBytes = builder.maxCombinedOutputBytes;
+        this.outputCallbackMode = builder.outputCallbackMode;
+        if (maxCombinedOutputBytes < 0 || maxCombinedOutputBytes > 2 * MAX_OUTPUT_BYTES) {
+            throw new IllegalArgumentException(
+                    "combined output budget must be 0 (disabled) or at most 128 MiB");
+        }
 
         if (timeout.isZero() || timeout.isNegative()) {
             throw new IllegalArgumentException("timeout must be positive");
@@ -142,6 +152,19 @@ public final class SandboxPolicy {
         }
     }
 
+    public OutputLimitAction onOutputLimit() {
+        return onOutputLimit;
+    }
+
+    /** Zero disables the shared stdout/stderr budget; individual budgets always apply. */
+    public int maxCombinedOutputBytes() {
+        return maxCombinedOutputBytes;
+    }
+
+    public OutputCallbackMode outputCallbackMode() {
+        return outputCallbackMode;
+    }
+
     public static final class Builder {
 
         private final Path workingDirectory;
@@ -154,6 +177,9 @@ public final class SandboxPolicy {
         private Duration timeout = DEFAULT_TIMEOUT;
         private int maxOutputBytes = DEFAULT_MAX_OUTPUT_BYTES;
         private boolean allowPathSearch;
+        private OutputLimitAction onOutputLimit = OutputLimitAction.TRUNCATE;
+        private int maxCombinedOutputBytes;
+        private OutputCallbackMode outputCallbackMode = OutputCallbackMode.RAW;
 
         private Builder(Path workingDirectory) {
             this.workingDirectory = Objects.requireNonNull(workingDirectory, "workingDirectory");
@@ -232,6 +258,24 @@ public final class SandboxPolicy {
 
         public Builder allowPathSearch(boolean allowPathSearch) {
             this.allowPathSearch = allowPathSearch;
+            return this;
+        }
+
+        public Builder onOutputLimit(OutputLimitAction action) {
+            this.onOutputLimit = Objects.requireNonNull(action, "action");
+            return this;
+        }
+
+        public Builder maxCombinedOutputBytes(int bytes) {
+            if (bytes < 1) {
+                throw new IllegalArgumentException("combined output budget must be positive");
+            }
+            this.maxCombinedOutputBytes = bytes;
+            return this;
+        }
+
+        public Builder outputCallbackMode(OutputCallbackMode mode) {
+            this.outputCallbackMode = Objects.requireNonNull(mode, "mode");
             return this;
         }
 

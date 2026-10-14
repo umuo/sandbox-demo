@@ -22,6 +22,7 @@ public final class ExecutionContext implements SandboxExecutionControl {
     private final int[] active = new int[Resource.values().length];
     private final SandboxCleanupState[] settled = new SandboxCleanupState[Resource.values().length];
     private long cleanupDeadline;
+    private volatile Runnable stopListener = () -> {};
     private boolean opaque;
     private SandboxCleanupResult reportedCleanup;
     private boolean workerFinished;
@@ -179,10 +180,18 @@ public final class ExecutionContext implements SandboxExecutionControl {
         return combine(state, declared);
     }
 
+    void onStop(Runnable listener) {
+        stopListener = listener;
+        if (stopped.get() != null) {
+            listener.run();
+        }
+    }
+
     public boolean stop(SandboxTerminationReason reason) {
         boolean changed = stopped.compareAndSet(null, reason);
         if (changed) {
             beginCleanup();
+            stopListener.run();
         }
         return changed;
     }
@@ -271,7 +280,9 @@ public final class ExecutionContext implements SandboxExecutionControl {
             throw new SandboxException(
                     reason == SandboxTerminationReason.TIMEOUT
                             ? SandboxErrorCode.TIMEOUT
-                            : SandboxErrorCode.CANCELLED,
+                            : reason == SandboxTerminationReason.OUTPUT_LIMIT
+                                    ? SandboxErrorCode.OUTPUT_LIMIT
+                                    : SandboxErrorCode.CANCELLED,
                     SandboxPhase.EXECUTION,
                     "execution stopped before next action");
         }

@@ -15,9 +15,9 @@ import io.github.sandboxdemo.api.SandboxCleanupState;
 import io.github.sandboxdemo.api.SandboxException;
 import io.github.sandboxdemo.api.SandboxResult;
 import io.github.sandboxdemo.core.ExecutionContext;
-import io.github.sandboxdemo.core.OutputCallbacks;
+import io.github.sandboxdemo.core.LimitedOutput;
+import io.github.sandboxdemo.core.OutputBudget;
 import io.github.sandboxdemo.core.ValidatedPolicy;
-import java.io.ByteArrayOutputStream;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -210,6 +210,25 @@ final class WindowsRestrictedProcessLauncher {
         }
         final ExecutionContext execution = context;
         ExecutionContext previous = ExecutionContext.attach(context);
+        OutputBudget outputBudget = new OutputBudget(policy, context);
+        LimitedOutput stdoutCapture =
+                new LimitedOutput(
+                        policy.maxOutputBytes(),
+                        stdoutConsumer,
+                        stdoutTextConsumer,
+                        stdoutCharset,
+                        stdoutCharsetAuto,
+                        outputBudget,
+                        policy.outputCallbackMode());
+        LimitedOutput stderrCapture =
+                new LimitedOutput(
+                        policy.maxOutputBytes(),
+                        stderrConsumer,
+                        stderrTextConsumer,
+                        stderrCharset,
+                        stderrCharsetAuto,
+                        outputBudget,
+                        policy.outputCallbackMode());
         ExecutionContext.Lease processLease = context.track(ExecutionContext.Resource.PROCESS);
         ExecutionContext.Lease hostLease = context.track(ExecutionContext.Resource.HOST);
         SandboxCleanupState jobState = SandboxCleanupState.UNKNOWN;
@@ -326,36 +345,26 @@ final class WindowsRestrictedProcessLauncher {
                                 thread.setDaemon(true);
                                 return thread;
                             });
-            Future<CapturedOutput> stdoutTask =
+            Future<?> stdoutTask =
                     WindowsExecutionSupport.submit(
                             readers,
                             execution,
                             () -> {
                                 try {
-                                    return readPipe(
-                                            capturedStdout.handle(),
-                                            policy.maxOutputBytes(),
-                                            stdoutConsumer,
-                                            stdoutTextConsumer,
-                                            stdoutCharset,
-                                            stdoutCharsetAuto);
+                                    readPipe(capturedStdout.handle(), stdoutCapture);
+                                    return null;
                                 } finally {
                                     capturedStdout.close();
                                 }
                             });
-            Future<CapturedOutput> stderrTask =
+            Future<?> stderrTask =
                     WindowsExecutionSupport.submit(
                             readers,
                             execution,
                             () -> {
                                 try {
-                                    return readPipe(
-                                            capturedStderr.handle(),
-                                            policy.maxOutputBytes(),
-                                            stderrConsumer,
-                                            stderrTextConsumer,
-                                            stderrCharset,
-                                            stderrCharsetAuto);
+                                    readPipe(capturedStderr.handle(), stderrCapture);
+                                    return null;
                                 } finally {
                                     capturedStderr.close();
                                 }
@@ -376,9 +385,9 @@ final class WindowsRestrictedProcessLauncher {
             int wait = WindowsExecutionSupport.waitForProcess(processInfo.hProcess, context);
             boolean timedOut = wait == WAIT_TIMEOUT;
             jobState = WindowsExecutionSupport.terminateJob(job, context);
-            WindowsExecutionSupport.await(inputTask, context);
-            CapturedOutput out = WindowsExecutionSupport.await(stdoutTask, context);
-            CapturedOutput err = WindowsExecutionSupport.await(stderrTask, context);
+            awaitOutput(inputTask, context);
+            awaitOutput(stdoutTask, context);
+            awaitOutput(stderrTask, context);
             IntByReference exitCode = new IntByReference(timedOut ? 124 : -1);
             if (!Kernel32.INSTANCE.GetExitCodeProcess(processInfo.hProcess, exitCode)) {
                 throw win32("GetExitCodeProcess");
@@ -387,11 +396,13 @@ final class WindowsRestrictedProcessLauncher {
             return new SandboxResult(
                     exitCode.getValue(),
                     timedOut,
-                    out.bytes(),
-                    err.bytes(),
-                    out.truncated(),
-                    err.truncated(),
-                    Duration.ofNanos(System.nanoTime() - started));
+                    stdoutCapture.bytes(),
+                    stderrCapture.bytes(),
+                    stdoutCapture.truncated(),
+                    stderrCapture.truncated(),
+                    Duration.ofNanos(System.nanoTime() - started),
+                    context.stopReason()
+                            == io.github.sandboxdemo.api.SandboxTerminationReason.OUTPUT_LIMIT);
         } finally {
             if (readers != null) {
                 readers.shutdownNow();
@@ -902,19 +913,22 @@ final class WindowsRestrictedProcessLauncher {
         }
     }
 
-    private static CapturedOutput readPipe(
-            Pointer pipe,
-            int limit,
-            java.util.function.Consumer<byte[]> byteConsumer,
-            java.util.function.Consumer<String> textConsumer,
-            Charset charset,
-            boolean autoDetect)
-            throws SandboxException {
-        ByteArrayOutputStream output = new ByteArrayOutputStream(Math.min(limit, 8192));
+    private static void awaitOutput(Future<?> task, ExecutionContext context)
+            throws SandboxException, InterruptedException {
+        try {
+            WindowsExecutionSupport.await(task, context);
+        } catch (SandboxException failure) {
+            if (context.stopReason()
+                    != io.github.sandboxdemo.api.SandboxTerminationReason.OUTPUT_LIMIT) {
+                throw failure;
+            }
+            // Output termination keeps its reason even if a callback/pipe cannot finish.
+            // The resource ledger independently retains UNKNOWN for unfinished stream tasks.
+        }
+    }
+
+    private static void readPipe(Pointer pipe, LimitedOutput output) throws SandboxException {
         byte[] buffer = new byte[8192];
-        boolean truncated = false;
-        OutputCallbacks callbacks =
-                new OutputCallbacks(byteConsumer, textConsumer, charset, autoDetect);
         try {
             while (true) {
                 IntByReference read = new IntByReference();
@@ -929,19 +943,14 @@ final class WindowsRestrictedProcessLauncher {
                 if (count == 0) {
                     break;
                 }
-                callbacks.accept(java.util.Arrays.copyOf(buffer, count));
-                int remaining = limit - output.size();
-                if (remaining > 0) {
-                    output.write(buffer, 0, Math.min(remaining, count));
-                }
-                if (count > remaining) {
-                    truncated = true;
+                output.accept(buffer, count);
+                if (output.shouldStopReading()) {
+                    break;
                 }
             }
         } finally {
-            callbacks.complete();
+            output.complete();
         }
-        return new CapturedOutput(output.toByteArray(), truncated);
     }
 
     private static SandboxException win32(String operation) {
@@ -959,25 +968,6 @@ final class WindowsRestrictedProcessLauncher {
     private static void close(Pointer handle) {
         if (!isInvalid(handle)) {
             Kernel32.INSTANCE.CloseHandle(handle);
-        }
-    }
-
-    private static final class CapturedOutput {
-
-        private final byte[] bytes;
-        private final boolean truncated;
-
-        private CapturedOutput(byte[] bytes, boolean truncated) {
-            this.bytes = bytes;
-            this.truncated = truncated;
-        }
-
-        byte[] bytes() {
-            return bytes;
-        }
-
-        boolean truncated() {
-            return truncated;
         }
     }
 

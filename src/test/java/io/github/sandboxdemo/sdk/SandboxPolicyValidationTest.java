@@ -90,4 +90,34 @@ class SandboxPolicyValidationTest {
                         .build());
         assertEquals(1, probes.get());
     }
+
+    @Test
+    void legacyBackendRejectsNewOutputConfigurationBeforeLaunchingAnything() {
+        AtomicInteger launches = new AtomicInteger();
+        SandboxRunner legacy =
+                new SandboxRunner() {
+                    public String backendName() {
+                        return "legacy-output";
+                    }
+
+                    public SandboxResult execute(SandboxRequest request) {
+                        launches.incrementAndGet();
+                        throw new AssertionError();
+                    }
+                };
+        SandboxException error =
+                assertThrows(
+                        SandboxException.class,
+                        () ->
+                                client(legacy)
+                                        .execute(
+                                                SandboxRequest.builder(workspace, "/bin/true")
+                                                        .readPolicy(ReadPolicy.DECLARED_ONLY)
+                                                        .network(NetworkPolicy.DENY)
+                                                        .onOutputLimit(OutputLimitAction.TERMINATE)
+                                                        .build()));
+        assertEquals(SandboxErrorCode.POLICY_UNSUPPORTED, error.code());
+        assertEquals(SandboxPhase.ADMISSION, error.phase());
+        assertEquals(0, launches.get());
+    }
 }

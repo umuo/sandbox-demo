@@ -24,6 +24,11 @@ import java.util.Map;
 public final class WindowsRestrictedTokenSandboxRunner implements SandboxRunner {
 
     @Override
+    public boolean supportsOutputPolicy(io.github.sandboxdemo.api.SandboxPolicy policy) {
+        return true;
+    }
+
+    @Override
     public String backendName() {
         return "windows-restricted-token";
     }

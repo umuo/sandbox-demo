@@ -48,9 +48,7 @@ public final class SandboxCompletion {
         return reason == SandboxTerminationReason.EXITED
                 && error == null
                 && result != null
-                && result.successful()
-                && !result.stdoutTruncated()
-                && !result.stderrTruncated()
+                && result.completeSuccessful()
                 && cleanup.confirmed();
     }
 

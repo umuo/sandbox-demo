@@ -56,8 +56,10 @@ public final class WindowsSandboxWorker {
                                 true,
                                 stdoutStream,
                                 stderrStream);
-                stdoutStream.throwIfFailed();
-                stderrStream.throwIfFailed();
+                if (!result.outputLimitTerminated()) {
+                    stdoutStream.throwIfFailed();
+                    stderrStream.throwIfFailed();
+                }
             } else {
                 result =
                         WindowsRestrictedProcessLauncher.execute(

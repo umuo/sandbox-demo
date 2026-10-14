@@ -1,6 +1,6 @@
 # AGT 接入维护进度
 
-本页记录 2026-10-14 开始的维护迭代。原始需求见 [Java AGT 接入需求](agt-integration-requirements.md)；该文档保留为实施前证据，不以修改旧观察替代修复验收。当前改动未发布、未推送。
+本页记录 2026-10-14 开始的维护迭代。原始需求见 [Java AGT 接入需求](agt-integration-requirements.md)；该文档保留为实施前证据，不以修改旧观察替代修复验收。当前改动未发布；前两阶段及跨平台修复已推送，最新确认的基线 CI 为 [015600d / Actions #27](https://github.com/umuo/sandbox-demo/actions/runs/38523189534)，11 组平台/JDK 任务及文档构建通过。
 
 ## 当前实施进度
 
@@ -8,8 +8,8 @@
 |---|---|---|
 | SDK-01 | macOS 实际请求预检 API；精确运行时权限修复；强制原生验收 | Linux/Windows 实际策略预检；其他 OS/架构验收；任意工具链依赖证明 |
 | SDK-02 | 新增执行句柄、取消、绝对 deadline、独立资源快照；共享监督器及 Windows 等待改造 | Windows/Linux 本机原生证据；Windows 宿主资源完整回滚确认 |
-| SDK-03 | 保持现有截断与 successful 语义 | 超限终止、聚合额度、完整成功契约 |
-| SDK-04 | 结构化能力及保守 UNKNOWN；CI 扩展 JDK 17/21 和 macOS arm64 | 后端版本、统一 per-policy readiness 结果、远端 CI 实际证据 |
+| SDK-03 | 输出超限终止、聚合额度、受限观察回调与完整成功契约 | 新阶段的远端原生验收结果见下文 |
+| SDK-04 | 结构化能力及保守 UNKNOWN；CI 扩展 JDK 17/21 和 macOS arm64 | 后端版本、统一 per-policy readiness 结果、扩展请求准入证据 |
 | SDK-05 | 默认结果/异常/状态字符串脱敏；错误码与阶段基础；关键入口分类 | 内部旧错误和 Windows worker 协议分类完整迁移 |
 | SDK-06 | 未改变环境和资源供应语义 | 严格环境 preset、可观察目录清理、工作区契约 |
 | SDK-07 | 描述现有资源能力，不新增硬限制 | 逐请求限额准入与外部资源后端 |
@@ -104,3 +104,17 @@ SANDBOX_RUN_PLATFORM_INTEGRATION=1 SANDBOX_RUN_LIFECYCLE_INTEGRATION=1 mvn -Dtes
 本地 Zulu JDK 8 `mvn verify` 与 Zulu 17 完整 macOS 原生测试通过。远端矩阵结果以修复提交对应 Actions 为准；尚未确认通过时不视为跨平台验收完成。
 
 后续矩阵已确认 Linux JDK 8/17/21、macOS Intel JDK 8/17/21 与 ARM JDK 17/21 通过。Windows 原生回收修复：Job 已触发终止时，根进程 TerminateProcess 可能因并发退出而失败；继续在原宽限期内等待根进程句柄发出退出信号，避免过早报告 UNKNOWN（依据 [TerminateProcess](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-terminateprocess) 的异步终止语义）。`859f09b` 的 Windows JDK 8/21 通过，JDK 17 的取消测试等待启动标记 40 秒失败；调整原生验收的启动预算，取消后的两秒清理宽限期保持不变。最终完整矩阵仍以最新修复提交的 Actions 结果为准。
+
+## SDK-03：输出超限终止
+
+新增显式 TERMINATE 与可选聚合保留额度，默认 TRUNCATE/RAW 保持兼容。共享 stdout/stderr 额度原子计数，先记录 OUTPUT_LIMIT 再调用观察回调；RETAINED 模式仅传递保留前缀。结果新增完整输出成功判断，完成 DTO 继续要求独立清理确认。自动解码的 UTF-8 半字符探测改为有限采样，避免持续合法输出在 EOF 前积累无限缓存。
+
+Windows 两种 launcher 使用同一捕获器；worker 协议 v5 传输配置及输出终止标记。超限后，worker 不等待可能阻塞的原文回调握手来写终止结果；父进程保留 OUTPUT_LIMIT，流回收状态独立呈现。旧自定义后端的新输出配置在准入阶段拒绝，不允许静默忽略。新增 Java 8 消费示例。
+
+原生测试使用合成输出，POSIX 无限输出由请求期限与输出终止双重约束；Windows 使用有限循环保护回归时的 CI 宿主。覆盖同时输出的总额度、超限前回调信号顺序、阻塞回调及后台清理、协议往返和旧版本拒绝。输出额度不等于硬资源限额，macOS processes UNKNOWN 与 Windows hostResources UNKNOWN 的边界保留。
+
+### 本地验收记录
+
+宿主 macOS 15.5 (24F74) arm64，系统 Seatbelt。实际 Zulu JDK 8u282 `verify`：103 项，0 失败、0 错误、25 跳过；Zulu 17.0.11 与 Zulu 21.0.4 启用全部 macOS 原生测试：各 103 项，0 失败、0 错误、14 跳过（Linux/Windows 原生用例）。Java 8 新增输出原生测试单独执行 2 项，0 失败、0 错误、0 跳过。七个消费示例在实际 JDK 8 与 JDK 17/21 的 Java 8 编译模式下通过；新示例在 JDK 8 运行得到 OUTPUT_LIMIT、stdoutBytes=64、macOS processes UNKNOWN，拒绝输出交付。严格文档构建通过。
+
+本机没有执行 Linux/Windows 新阶段原生验收，须由本阶段对应远端 Actions 验证；不把先前阶段的通过当作本阶段证据。Windows CI 新增聚合额度/受限回调和阻塞父进程回调两项原生用例。默认受限 token 在管理员 CI 宿主仍遵循原拒绝/跳过边界，未通过放宽权限来执行。协议 v5 只用于同版本可信 worker，未发布新 Central 制品。

@@ -225,7 +225,8 @@ public final class OutputCallbacks {
             }
 
             int utf8 = OutputCharsetDetector.utf8Status(bytes, false);
-            if (utf8 == OutputCharsetDetector.UTF8_VALID) {
+            if (utf8 == OutputCharsetDetector.UTF8_VALID
+                    || (utf8 == OutputCharsetDetector.UTF8_INCOMPLETE && bytes.length >= 8192)) {
                 select(StandardCharsets.UTF_8, bytes, 0);
             } else if (utf8 == OutputCharsetDetector.UTF8_INVALID) {
                 select(fallback, bytes, 0);

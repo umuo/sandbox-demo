@@ -5,6 +5,13 @@ public interface SandboxRunner {
 
     String backendName();
 
+    /** Legacy backends accept legacy output defaults; new options must be explicitly supported. */
+    default boolean supportsOutputPolicy(SandboxPolicy policy) {
+        return policy.onOutputLimit() == OutputLimitAction.TRUNCATE
+                && policy.maxCombinedOutputBytes() == 0
+                && policy.outputCallbackMode() == OutputCallbackMode.RAW;
+    }
+
     /**
      * 使用可信探针验证实际策略，不启动调用方命令。旧后端默认拒绝此能力。
      *

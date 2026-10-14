@@ -95,7 +95,10 @@ public final class PathPolicyValidator {
                     policy.deletionPolicy(),
                     policy.timeout(),
                     policy.maxOutputBytes(),
-                    policy.allowPathSearch());
+                    policy.allowPathSearch(),
+                    policy.onOutputLimit(),
+                    policy.maxCombinedOutputBytes(),
+                    policy.outputCallbackMode());
         } catch (IOException e) {
             if (temp != null) {
                 cleanupDirectory(temp);

@@ -32,6 +32,23 @@ public final class ManagedExecution implements SandboxExecution {
 
     public ManagedExecution(ExecutionContext context) {
         this.context = context;
+        // Enqueue only: stop can be called while holding the context monitor.
+        // Taking this execution's monitor synchronously would invert lock ordering.
+        context.onStop(() -> CLOCK.execute(this::scheduleStopped));
+    }
+
+    private synchronized void scheduleStopped() {
+        if (completion.get() != null) {
+            return;
+        }
+        if (delivery != null) {
+            delivery.cancel(false);
+        }
+        delivery =
+                CLOCK.schedule(
+                        this::deliverStopped,
+                        context.cleanupRemainingNanos(),
+                        TimeUnit.NANOSECONDS);
     }
 
     public synchronized void submit(Callable<SandboxResult> operation, ThreadPoolExecutor workers) {
@@ -111,16 +128,21 @@ public final class ManagedExecution implements SandboxExecution {
             reason =
                     error != null
                             ? SandboxTerminationReason.FAILED
-                            : result.timedOut()
-                                    ? SandboxTerminationReason.TIMEOUT
-                                    : SandboxTerminationReason.EXITED;
+                            : result.outputLimitTerminated()
+                                    ? SandboxTerminationReason.OUTPUT_LIMIT
+                                    : result.timedOut()
+                                            ? SandboxTerminationReason.TIMEOUT
+                                            : SandboxTerminationReason.EXITED;
         }
         if (reason == SandboxTerminationReason.TIMEOUT
-                || reason == SandboxTerminationReason.CANCELLED) {
+                || reason == SandboxTerminationReason.CANCELLED
+                || reason == SandboxTerminationReason.OUTPUT_LIMIT) {
             SandboxErrorCode code =
                     reason == SandboxTerminationReason.TIMEOUT
                             ? SandboxErrorCode.TIMEOUT
-                            : SandboxErrorCode.CANCELLED;
+                            : reason == SandboxTerminationReason.OUTPUT_LIMIT
+                                    ? SandboxErrorCode.OUTPUT_LIMIT
+                                    : SandboxErrorCode.CANCELLED;
             if (error == null || error.code() != code) {
                 error =
                         new SandboxException(
@@ -144,7 +166,9 @@ public final class ManagedExecution implements SandboxExecution {
                         new SandboxException(
                                 reason == SandboxTerminationReason.CANCELLED
                                         ? SandboxErrorCode.CANCELLED
-                                        : SandboxErrorCode.TIMEOUT,
+                                        : reason == SandboxTerminationReason.OUTPUT_LIMIT
+                                                ? SandboxErrorCode.OUTPUT_LIMIT
+                                                : SandboxErrorCode.TIMEOUT,
                                 context.started() ? SandboxPhase.CLEANUP : SandboxPhase.ADMISSION,
                                 "completion deadline reached; consult independent cleanup snapshot"),
                         context.cleanup()));

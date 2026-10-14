@@ -31,6 +31,11 @@ public final class WindowsProductionSandboxRunner implements SandboxRunner {
     }
 
     @Override
+    public boolean supportsOutputPolicy(io.github.sandboxdemo.api.SandboxPolicy policy) {
+        return true;
+    }
+
+    @Override
     public String backendName() {
         return "windows-dedicated-user-restricted-token";
     }

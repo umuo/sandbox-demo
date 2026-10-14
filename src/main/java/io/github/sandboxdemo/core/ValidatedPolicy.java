@@ -20,6 +20,9 @@ public final class ValidatedPolicy {
     private final Duration timeout;
     private final int maxOutputBytes;
     private final boolean allowPathSearch;
+    private final io.github.sandboxdemo.api.OutputLimitAction onOutputLimit;
+    private final int maxCombinedOutputBytes;
+    private final io.github.sandboxdemo.api.OutputCallbackMode outputCallbackMode;
 
     public ValidatedPolicy(
             Path workingDirectory,
@@ -33,6 +36,48 @@ public final class ValidatedPolicy {
             Duration timeout,
             int maxOutputBytes,
             boolean allowPathSearch) {
+        this(
+                workingDirectory,
+                readableRoots,
+                writableRoots,
+                protectedPaths,
+                privateTempDirectory,
+                networkPolicy,
+                readPolicy,
+                deletionPolicy,
+                timeout,
+                maxOutputBytes,
+                allowPathSearch,
+                io.github.sandboxdemo.api.OutputLimitAction.TRUNCATE,
+                0,
+                io.github.sandboxdemo.api.OutputCallbackMode.RAW);
+    }
+
+    public ValidatedPolicy(
+            Path workingDirectory,
+            List<Path> readableRoots,
+            List<Path> writableRoots,
+            List<Path> protectedPaths,
+            Path privateTempDirectory,
+            NetworkPolicy networkPolicy,
+            ReadPolicy readPolicy,
+            DeletionPolicy deletionPolicy,
+            Duration timeout,
+            int maxOutputBytes,
+            boolean allowPathSearch,
+            io.github.sandboxdemo.api.OutputLimitAction onOutputLimit,
+            int maxCombinedOutputBytes,
+            io.github.sandboxdemo.api.OutputCallbackMode outputCallbackMode) {
+        if (maxOutputBytes < 1
+                || maxOutputBytes > 64 * 1024 * 1024
+                || maxCombinedOutputBytes < 0
+                || maxCombinedOutputBytes > 128 * 1024 * 1024) {
+            throw new IllegalArgumentException("invalid output budgets");
+        }
+        this.onOutputLimit = java.util.Objects.requireNonNull(onOutputLimit, "onOutputLimit");
+        this.maxCombinedOutputBytes = maxCombinedOutputBytes;
+        this.outputCallbackMode =
+                java.util.Objects.requireNonNull(outputCallbackMode, "outputCallbackMode");
         this.workingDirectory = workingDirectory;
         this.readableRoots = readableRoots;
         this.writableRoots = writableRoots;
@@ -84,6 +129,18 @@ public final class ValidatedPolicy {
 
     public int maxOutputBytes() {
         return maxOutputBytes;
+    }
+
+    public io.github.sandboxdemo.api.OutputLimitAction onOutputLimit() {
+        return onOutputLimit;
+    }
+
+    public int maxCombinedOutputBytes() {
+        return maxCombinedOutputBytes;
+    }
+
+    public io.github.sandboxdemo.api.OutputCallbackMode outputCallbackMode() {
+        return outputCallbackMode;
     }
 
     public boolean allowPathSearch() {

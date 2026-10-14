@@ -17,6 +17,8 @@ final class WindowsExecutionSupport {
         return SandboxCleanupState.UNKNOWN;
     }
 
+    static final int WAIT_OUTPUT_LIMIT = 65536;
+
     private WindowsExecutionSupport() {}
 
     static int waitForProcess(Pointer process, ExecutionContext context) throws SandboxException {
@@ -27,6 +29,9 @@ final class WindowsExecutionSupport {
                         SandboxErrorCode.CANCELLED,
                         SandboxPhase.EXECUTION,
                         "Windows execution cancelled");
+            }
+            if (context.stopReason() == SandboxTerminationReason.OUTPUT_LIMIT) {
+                return WAIT_OUTPUT_LIMIT;
             }
             if (context.stopReason() == SandboxTerminationReason.TIMEOUT) {
                 return 258;

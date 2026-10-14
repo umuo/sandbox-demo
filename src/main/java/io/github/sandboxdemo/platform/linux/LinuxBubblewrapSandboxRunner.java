@@ -44,6 +44,11 @@ public final class LinuxBubblewrapSandboxRunner implements SandboxRunner {
                     java.nio.file.Paths.get("/etc/ca-certificates"));
 
     @Override
+    public boolean supportsOutputPolicy(io.github.sandboxdemo.api.SandboxPolicy policy) {
+        return true;
+    }
+
+    @Override
     public String backendName() {
         return "linux-bubblewrap";
     }

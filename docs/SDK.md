@@ -171,6 +171,28 @@ SandboxResult result = client.execute(next.build());
 可运行的双请求切换示例位于
 `examples/sdk-consumer/src/main/java/example/WindowsDynamicPolicyExample.java`。
 
+## 输出额度与超限终止
+
+现有默认保持 `onOutputLimit(TRUNCATE)`：stdout/stderr 分别保留最多 `maxOutputBytes` 字节，继续排空目标输出。`successful()` 仍仅表示未超时且退出码为零。新 `SandboxResult.completeSuccessful()` 还拒绝截断和输出超限终止；`SandboxCompletion.completeSuccessful()` 在此基础上要求回收已确认。
+
+```java
+SandboxRequest request = SandboxRequest.builder(workspace, "/bin/sh")
+        .arguments("-c", "printf synthetic-output")
+        .maxOutputBytes(1024 * 1024) // 每个流；既有默认 4 MiB，最大 64 MiB
+        .maxCombinedOutputBytes(1024 * 1024) // 可选共享额度；最大 128 MiB
+        .onOutputLimit(OutputLimitAction.TERMINATE)
+        .outputCallbackMode(OutputCallbackMode.RETAINED)
+        .build();
+```
+
+聚合额度默认关闭（getter 为 0）。配置后，两个捕获线程原子共享额度，保留总字节数不会超过配置值；流之间的额度分配由读取到达顺序决定。恰好达到额度不算超限，观察到额外字节时触发。TERMINATE 请求停止目标，执行句柄以 `OUTPUT_LIMIT` 及同名错误码返回；同步结果可检查 `outputLimitTerminated()`。输出停止、超时与取消以首先记录的停止原因作为契约，清理仍受既有宽限约束。回调或宿主清理卡住时，交付可以不含结果，但原因稳定，独立资源快照保留 UNKNOWN/FAILED。
+
+回调默认 `RAW`，兼容原文观察语义：TRUNCATE 下可以收到超过保留额度的原文，TERMINATE 下也可能收到触发超限的整块原文。`RETAINED` 将回调限制在各流实际保留的前缀，共享额度同样约束字节回调；文本回调再对这些字节进行解码。超限信号在回调之前记录，因此阻塞回调不会使期限交付等待无界。自动字符集探测使用有限采样；合法 UTF-8 前缀持续以半个字符结束时也不会无限缓存到 EOF。
+
+这两种回调都是观察接口，不能作为受治理的最终内容交付。受控调用方应不注册回调，等待完整成功及回收确认，再严格解码并治理最终字节；失败结果中的字节仅供显式诊断，不能把截断前缀交付为完整答案。输出额度不是 CPU、内存、PID 或磁盘硬限额。
+
+内建 Linux/macOS 和两个 Windows 后端支持这些选项。旧自定义 runner 通过新增默认方法 `supportsOutputPolicy` 只接受旧默认值；新配置在目标启动前拒绝。扩展后端必须显式声明并实现对应保证。Windows 内部 worker 文件协议升级为 v5，携带输出策略和终止标记；已安装的专用账户 worker 必须用同版本 SDK 重新供应运行时，旧协议明确拒绝，不能静默忽略新配置。消费示例见 `examples/sdk-consumer/src/main/java/example/SandboxOutputLimitExample.java`。
+
 ## 中断、超时与实时流式输出
 
 - `SandboxClient.execute` 是同步调用。Agent 可以在自己的受控 Executor 中调用。

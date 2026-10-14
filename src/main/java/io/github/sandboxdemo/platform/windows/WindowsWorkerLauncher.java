@@ -213,10 +213,20 @@ final class WindowsWorkerLauncher {
                                 + exitCode.getValue()
                                 + " without a result file");
             }
+            SandboxResult result = WindowsWorkerProtocol.readResult(session.resultFile());
+            if (result.outputLimitTerminated()) {
+                context.stop(io.github.sandboxdemo.api.SandboxTerminationReason.OUTPUT_LIMIT);
+            }
             streamingComplete.set(true);
-            WindowsExecutionSupport.await(stdoutTask, context);
-            WindowsExecutionSupport.await(stderrTask, context);
-            return WindowsWorkerProtocol.readResult(session.resultFile());
+            try {
+                WindowsExecutionSupport.await(stdoutTask, context);
+                WindowsExecutionSupport.await(stderrTask, context);
+            } catch (SandboxException outputFailure) {
+                if (!result.outputLimitTerminated()) {
+                    throw outputFailure;
+                }
+            }
+            return result;
         } finally {
             streamingComplete.set(true);
             streamReaders.shutdownNow();

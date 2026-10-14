@@ -337,4 +337,49 @@ class SandboxExecutionLifecycleTest {
             pool.shutdownNow();
         }
     }
+
+    @Test
+    void outputLimitSignalsBoundedDeliveryEvenWhenBackendCleanupIsBlocked() throws Exception {
+        CountDownLatch release = new CountDownLatch(1);
+        SandboxRunner runner =
+                new SandboxRunner() {
+                    public String backendName() {
+                        return "blocked-output-cleanup";
+                    }
+
+                    public boolean supportsOutputPolicy(SandboxPolicy policy) {
+                        return true;
+                    }
+
+                    public SandboxResult execute(SandboxRequest request)
+                            throws InterruptedException {
+                        io.github.sandboxdemo.core.ExecutionContext.current()
+                                .stop(SandboxTerminationReason.OUTPUT_LIMIT);
+                        release.await();
+                        return success();
+                    }
+                };
+        ThreadPoolExecutor workers = pool(1);
+        try {
+            SandboxExecution execution =
+                    client(runner)
+                            .start(
+                                    SandboxRequest.builder(workspace, "/bin/true")
+                                            .readPolicy(ReadPolicy.DECLARED_ONLY)
+                                            .network(NetworkPolicy.DENY)
+                                            .timeout(Duration.ofSeconds(10))
+                                            .onOutputLimit(OutputLimitAction.TERMINATE)
+                                            .build(),
+                                    workers);
+            SandboxCompletion completion = execution.await(Duration.ofSeconds(1));
+            assertEquals(SandboxTerminationReason.OUTPUT_LIMIT, completion.reason());
+            assertEquals(SandboxErrorCode.OUTPUT_LIMIT, completion.error().get().code());
+            assertFalse(completion.cleanup().workerFinished());
+            assertFalse(completion.completeSuccessful());
+        } finally {
+            release.countDown();
+            workers.shutdownNow();
+            assertTrue(workers.awaitTermination(1, TimeUnit.SECONDS));
+        }
+    }
 }

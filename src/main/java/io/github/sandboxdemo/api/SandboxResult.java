@@ -17,6 +17,7 @@ public final class SandboxResult {
     private final boolean stdoutTruncated;
     private final boolean stderrTruncated;
     private final Duration duration;
+    private final boolean outputLimitTerminated;
 
     public SandboxResult(
             int exitCode,
@@ -26,6 +27,19 @@ public final class SandboxResult {
             boolean stdoutTruncated,
             boolean stderrTruncated,
             Duration duration) {
+        this(exitCode, timedOut, stdout, stderr, stdoutTruncated, stderrTruncated, duration, false);
+    }
+
+    public SandboxResult(
+            int exitCode,
+            boolean timedOut,
+            byte[] stdout,
+            byte[] stderr,
+            boolean stdoutTruncated,
+            boolean stderrTruncated,
+            Duration duration,
+            boolean outputLimitTerminated) {
+        this.outputLimitTerminated = outputLimitTerminated;
         this.exitCode = exitCode;
         this.timedOut = timedOut;
         this.stdout = Arrays.copyOf(stdout, stdout.length);
@@ -105,6 +119,15 @@ public final class SandboxResult {
         return !timedOut && exitCode == 0;
     }
 
+    public boolean outputLimitTerminated() {
+        return outputLimitTerminated;
+    }
+
+    /** Command and output completeness only; use SandboxCompletion for cleanup confirmation. */
+    public boolean completeSuccessful() {
+        return successful() && !outputLimitTerminated && !stdoutTruncated && !stderrTruncated;
+    }
+
     @Override
     public boolean equals(Object other) {
         if (this == other) {
@@ -116,6 +139,7 @@ public final class SandboxResult {
         SandboxResult that = (SandboxResult) other;
         return exitCode == that.exitCode
                 && timedOut == that.timedOut
+                && outputLimitTerminated == that.outputLimitTerminated
                 && stdoutTruncated == that.stdoutTruncated
                 && stderrTruncated == that.stderrTruncated
                 && Arrays.equals(stdout, that.stdout)
@@ -125,7 +149,14 @@ public final class SandboxResult {
 
     @Override
     public int hashCode() {
-        int result = Objects.hash(exitCode, timedOut, stdoutTruncated, stderrTruncated, duration);
+        int result =
+                Objects.hash(
+                        exitCode,
+                        timedOut,
+                        stdoutTruncated,
+                        stderrTruncated,
+                        duration,
+                        outputLimitTerminated);
         result = 31 * result + Arrays.hashCode(stdout);
         return 31 * result + Arrays.hashCode(stderr);
     }
@@ -136,6 +167,8 @@ public final class SandboxResult {
                 + exitCode
                 + ", timedOut="
                 + timedOut
+                + ", outputLimitTerminated="
+                + outputLimitTerminated
                 + ", stdoutBytes="
                 + stdout.length
                 + ", stderrBytes="
