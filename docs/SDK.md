@@ -12,9 +12,9 @@ Agent 项目添加：
 
 ```xml
 <dependency>
-    <groupId>io.github.sandboxdemo</groupId>
+    <groupId>io.github.umuo</groupId>
     <artifactId>agent-sandbox-sdk</artifactId>
-    <version>1.0.0-SNAPSHOT</version>
+    <version>0.1.0-alpha.1</version>
 </dependency>
 ```
 

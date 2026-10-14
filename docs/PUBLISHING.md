@@ -21,18 +21,42 @@ mvn clean deploy \
   -DaltDeploymentRepository=internal::default::https://repo.example.com/releases
 ```
 
-## 对外发布前必须补充
+## Maven Central
 
-当前仓库不知道最终项目所有者和发布地址，因此没有虚构这些元数据。公开发布 Maven Central 前必须由项目所有者确认并补充：
+发布坐标为 `io.github.umuo:agent-sandbox-sdk`，Java 包名保持 `io.github.sandboxdemo.*`。项目使用 MIT 许可证。
+首次发布版本为 `0.1.0-alpha.1`；主仓库保留开发版本 `1.0.0-SNAPSHOT`。`0.1.0-alpha.1` 已公开发布到 Maven Central，并已从公共仓库下载核对全部制品与签名。
 
-- 正式的反向域名 `groupId`；
-- 项目 URL、SCM URL 和 issue tracker；
-- 项目许可证以及 `LICENSE`/`NOTICE`；
-- 开发者/组织信息；
-- CI 中的签名和 Maven Central 发布凭据；
-- 不可变正式版本，禁止发布 `1.0.0-SNAPSHOT` 到 release 仓库。
+本地凭据统一保存在 `~/.config/maven-central/publishing.env`，提供
+`CENTRAL_USERNAME`、`CENTRAL_PASSWORD`、`MAVEN_GPG_KEY` 和 `MAVEN_GPG_PASSPHRASE`。
+`.mvn/central-settings.xml` 只引用环境变量，不保存凭据原文。
 
-构建已经附加主 JAR、sources JAR 和 javadoc JAR，并在 manifest 中声明 `Automatic-Module-Name: io.github.sandboxdemo.sdk`。
+本地发布使用 Maven 3.9.9 或兼容的更新版本。
+
+在独立发布副本中把根 POM 和 consumer 示例的版本改为目标版本，然后执行：
+
+```bash
+source ~/.config/maven-central/publishing.env
+mvn -B -ntp -s .mvn/central-settings.xml -Pcentral-artifacts clean install
+mvn -B -ntp -s .mvn/central-settings.xml -f examples/sdk-consumer/pom.xml clean package
+mvn -B -ntp -s .mvn/central-settings.xml -Pcentral-artifacts,central-upload deploy
+```
+
+`central-artifacts` 在 verify 阶段使用 BC signer 签名；常规构建仍生成 sources 和 Javadoc。
+`central-upload` 拒绝 SNAPSHOT，并跳过 CLI `all.jar`，只上传 SDK、POM、sources、Javadoc 及签名。
+上传配置为 `autoPublish=false`、`waitUntil=validated`；校验通过后在
+[Central Portal](https://central.sonatype.com/publishing/deployments) 检查并点击 Publish。
+只有状态达到 PUBLISHED 后才算公开发布。已发布版本不可覆盖。
+
+发布后用空缓存验证下载：
+
+```bash
+mvn -B -ntp -s .mvn/central-settings.xml -Dmaven.repo.local=/tmp/sandbox-central-download \
+  org.apache.maven.plugins:maven-dependency-plugin:3.8.1:get \
+  -Dartifact=io.github.umuo:agent-sandbox-sdk:0.1.0-alpha.1
+```
+
+无需密钥的签名前打包检查可以使用 `-Pcentral-artifacts -Dgpg.skip=true clean verify`，
+这不会生成有效签名。普通本地构建继续保留部署/演示 CLI `all.jar`。
 
 ## 发布顺序
 
@@ -43,3 +67,19 @@ mvn clean deploy \
 5. 发布 SDK/POM/sources/javadoc；CLI `all.jar` 作为单独部署制品保存。
 6. Windows 节点停止任务，在维护窗口用同版本 CLI 重新 setup。
 7. Agent 启动时调用 `SandboxClient.status()`，未就绪时失败关闭。
+
+## 公钥分发与校验失败
+
+首次签名前将实际签名密钥的公钥分发到 Sonatype 支持的服务器：
+
+```bash
+gpg --keyserver hkps://keyserver.ubuntu.com --send-keys YOUR_FULL_FINGERPRINT
+gpg --keyserver hkps://keys.openpgp.org --send-keys YOUR_FULL_FINGERPRINT
+```
+
+若 Central 返回 `Could not find a public key by the key fingerprint`，
+先核对实际制品签名的指纹与公钥一致，并从远端重新获取公钥验证签名。
+本地签名有效、服务器可检索不等于 Central 已能取得公钥；等待后重新上传未发布版本。
+2026-10-14 重新上传 `0.1.0-alpha.1` 后 Central 校验通过（VALIDATED），部署 ID 为
+`f98fa6ad-727e-4a3b-aa13-d65fa18cba57`，现已在 Portal 发布，公共仓库中的 SDK、POM、sources、Javadoc 与最终上传制品一致，PGP 签名验证通过；全新 Maven 缓存下载 SDK 及 JNA 传递依赖也已通过。
+本地验收记录和发布包保存在 `target/central-release-evidence/`。

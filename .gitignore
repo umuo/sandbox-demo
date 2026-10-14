@@ -2,7 +2,7 @@
 /examples/*/target/
 /site/
 /.venv-docs/
-/.idea/
+.idea/
 *.iml
 .DS_Store
 /.sandbox-demo/
