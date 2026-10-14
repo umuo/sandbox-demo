@@ -136,10 +136,10 @@ public final class SandboxResult {
                 + exitCode
                 + ", timedOut="
                 + timedOut
-                + ", stdout="
-                + Arrays.toString(stdout)
-                + ", stderr="
-                + Arrays.toString(stderr)
+                + ", stdoutBytes="
+                + stdout.length
+                + ", stderrBytes="
+                + stderr.length
                 + ", stdoutTruncated="
                 + stdoutTruncated
                 + ", stderrTruncated="

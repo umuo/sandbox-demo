@@ -38,6 +38,16 @@ public final class WindowsProductionSandboxRunner implements SandboxRunner {
     @Override
     public SandboxResult execute(SandboxRequest request)
             throws SandboxException, InterruptedException {
+        io.github.sandboxdemo.core.ExecutionContext context =
+                io.github.sandboxdemo.core.ExecutionContext.current();
+        if (context != null) {
+            context.managedBackend();
+            context.checkActive();
+        }
+        io.github.sandboxdemo.core.ExecutionContext.Lease preparation =
+                context == null
+                        ? null
+                        : context.track(io.github.sandboxdemo.core.ExecutionContext.Resource.HOST);
         ValidatedPolicy policy = PathPolicyValidator.validate(request.policy());
         try {
             if (policy.readPolicy() != ReadPolicy.HOST) {
@@ -100,7 +110,13 @@ public final class WindowsProductionSandboxRunner implements SandboxRunner {
                         request.stderrCharsetAuto());
             }
         } finally {
-            PathPolicyValidator.cleanup(policy);
+            try {
+                PathPolicyValidator.cleanup(policy);
+            } finally {
+                if (preparation != null) {
+                    preparation.complete(io.github.sandboxdemo.api.SandboxCleanupState.UNKNOWN);
+                }
+            }
         }
     }
 

@@ -25,15 +25,24 @@ jobs:
       matrix:
         # Temurin 8 is not published for the arm64 architecture behind macos-latest.
         os: [ubuntu-latest, macos-15-intel, windows-latest]
+        java: ['8', '17', '21']
+        include:
+          - os: macos-15
+            java: '17'
+          - os: macos-15
+            java: '21'
     runs-on: ${{ matrix.os }}
     env:
       SANDBOX_RUN_PLATFORM_INTEGRATION: '1'
+      SANDBOX_RUN_LIFECYCLE_INTEGRATION: '1'
+      # Modern macOS admission failures are failures, never successful skips.
+      SANDBOX_MACOS_STRICT_ACCEPTANCE: ${{ startsWith(matrix.os, 'macos-') && matrix.java != '8' && '1' || '0' }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: '8'
+          java-version: ${{ matrix.java }}
           cache: maven
       - name: Install bubblewrap
         if: runner.os == 'Linux'
@@ -56,6 +65,12 @@ jobs:
         run: mvn --batch-mode --no-transfer-progress test
       - name: Compile external SDK consumer
         run: mvn --batch-mode --no-transfer-progress -f examples/sdk-consumer/pom.xml clean package
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-evidence-${{ matrix.os }}-jdk-${{ matrix.java }}
+          path: target/surefire-reports/
       - name: Uninstall production Windows sandbox
         if: runner.os == 'Windows' && always()
         shell: pwsh

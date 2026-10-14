@@ -3,7 +3,10 @@ package io.github.sandboxdemo.sdk;
 import io.github.sandboxdemo.api.CommandSpec;
 import io.github.sandboxdemo.api.SandboxBackendUnavailableException;
 import io.github.sandboxdemo.api.SandboxCapabilities;
+import io.github.sandboxdemo.api.SandboxErrorCode;
 import io.github.sandboxdemo.api.SandboxException;
+import io.github.sandboxdemo.api.SandboxExecution;
+import io.github.sandboxdemo.api.SandboxPhase;
 import io.github.sandboxdemo.api.SandboxPlatform;
 import io.github.sandboxdemo.api.SandboxPolicy;
 import io.github.sandboxdemo.api.SandboxRequest;
@@ -11,8 +14,12 @@ import io.github.sandboxdemo.api.SandboxResult;
 import io.github.sandboxdemo.api.SandboxRunner;
 import io.github.sandboxdemo.api.SandboxRuntimeStatus;
 import io.github.sandboxdemo.core.DefaultSandboxRunnerFactory;
+import io.github.sandboxdemo.core.ExecutionContext;
+import io.github.sandboxdemo.core.ManagedExecution;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.Objects;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.function.Supplier;
 
 /**
@@ -23,11 +30,13 @@ import java.util.function.Supplier;
  */
 public final class SandboxClient {
 
+    private final Duration cleanupGrace;
     private final SandboxRunner runner;
     private final SandboxCapabilities capabilities;
     private final Supplier<SandboxRuntimeStatus> statusSupplier;
 
     private SandboxClient(Builder builder) {
+        this.cleanupGrace = builder.cleanupGrace;
         SandboxPlatform platform = SandboxPlatform.current();
         Path windowsHome =
                 builder.windowsHome == null
@@ -59,9 +68,57 @@ public final class SandboxClient {
     public SandboxResult execute(SandboxRequest request)
             throws SandboxException, InterruptedException {
         SandboxRequest required = Objects.requireNonNull(request, "request");
-        SandboxPolicy policy = required.policy();
+        validateCapabilities(required.policy());
+        ExecutionContext context = ExecutionContext.current();
+        boolean owned = context == null;
+        if (owned) {
+            context = new ExecutionContext(required.policy().timeout(), cleanupGrace);
+            context.beginWorker();
+        }
+        ExecutionContext previous = ExecutionContext.attach(context);
+        try {
+            context.checkActive();
+            context.opaqueBackend();
+            return runner.execute(required, context);
+        } finally {
+            if (owned) {
+                context.finishWorker();
+            }
+            ExecutionContext.restore(previous);
+        }
+    }
+
+    /** 在宿主有限工作池启动执行；要求有限队列与 AbortPolicy，禁止在提交线程执行工作。 */
+    public SandboxExecution start(SandboxRequest request, ThreadPoolExecutor workers)
+            throws SandboxException {
+        SandboxRequest required = Objects.requireNonNull(request, "request");
+        Objects.requireNonNull(workers, "workers");
+        if ((long) workers.getQueue().size() + workers.getQueue().remainingCapacity()
+                        >= Integer.MAX_VALUE
+                || !(workers.getRejectedExecutionHandler()
+                        instanceof ThreadPoolExecutor.AbortPolicy)) {
+            throw new IllegalArgumentException(
+                    "execution pool requires a bounded queue and AbortPolicy");
+        }
+        validateCapabilities(required.policy());
+        ExecutionContext context = new ExecutionContext(required.policy().timeout(), cleanupGrace);
+        ManagedExecution execution = new ManagedExecution(context);
+        execution.submit(() -> execute(required), workers);
+        return execution;
+    }
+
+    /** 在预算提交前验证请求能力与实际策略。探针不执行目标命令；执行时仍重新预检。 */
+    public void validate(SandboxRequest request) throws SandboxException, InterruptedException {
+        SandboxRequest required = Objects.requireNonNull(request, "request");
+        validateCapabilities(required.policy());
+        runner.validate(required);
+    }
+
+    private void validateCapabilities(SandboxPolicy policy) throws SandboxException {
         if (!capabilities.supports(policy.readPolicy())) {
             throw new SandboxBackendUnavailableException(
+                    SandboxErrorCode.POLICY_UNSUPPORTED,
+                    SandboxPhase.ADMISSION,
                     "sandbox backend "
                             + capabilities.backendName()
                             + " does not support read policy "
@@ -69,6 +126,8 @@ public final class SandboxClient {
         }
         if (!capabilities.supports(policy.networkPolicy())) {
             throw new SandboxBackendUnavailableException(
+                    SandboxErrorCode.POLICY_UNSUPPORTED,
+                    SandboxPhase.ADMISSION,
                     "sandbox backend "
                             + capabilities.backendName()
                             + " does not support network policy "
@@ -76,12 +135,13 @@ public final class SandboxClient {
         }
         if (!capabilities.supports(policy.deletionPolicy())) {
             throw new SandboxBackendUnavailableException(
+                    SandboxErrorCode.POLICY_UNSUPPORTED,
+                    SandboxPhase.ADMISSION,
                     "sandbox backend "
                             + capabilities.backendName()
                             + " does not support deletion policy "
                             + policy.deletionPolicy());
         }
-        return runner.execute(required);
     }
 
     /** Convenience overload for a request without additional environment variables. */
@@ -108,12 +168,26 @@ public final class SandboxClient {
     /** Builder for SDK configuration. */
     public static final class Builder {
 
+        private Duration cleanupGrace = Duration.ofSeconds(2);
         private Path windowsHome;
         private SandboxRunner runner;
         private SandboxCapabilities capabilities;
         private Supplier<SandboxRuntimeStatus> statusSupplier;
 
         private Builder() {}
+
+        /** 设置统一清理宽限，范围为大于零至 30 秒。 */
+        public Builder cleanupGrace(Duration grace) {
+            Objects.requireNonNull(grace, "grace");
+            if (grace.isNegative()
+                    || grace.isZero()
+                    || grace.compareTo(Duration.ofSeconds(30)) > 0) {
+                throw new IllegalArgumentException(
+                        "cleanup grace must be positive and at most 30 seconds");
+            }
+            this.cleanupGrace = grace;
+            return this;
+        }
 
         /**
          * Selects the opt-in dedicated-account Windows backend at this setup/runtime directory.

@@ -53,8 +53,8 @@ public final class SandboxRuntimeStatus {
                 + capabilities
                 + ", ready="
                 + ready
-                + ", diagnostic="
-                + diagnostic
+                + ", diagnosticAvailable="
+                + !diagnostic.isEmpty()
                 + "]";
     }
 }

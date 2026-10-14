@@ -33,6 +33,37 @@ class MacOsSeatbeltProfileTest {
     }
 
     @Test
+    void runtimeDiscoveryUsesExactDirectoryAndAncestorMetadataRules() throws Exception {
+        ValidatedPolicy policy =
+                PathPolicyValidator.validate(SandboxPolicy.builder(workspace).build());
+        try {
+            MacOsSeatbeltProfile.GeneratedProfile generated = MacOsSeatbeltProfile.generate(policy);
+            assertTrue(generated.profile().contains("(literal \"/\") (vnode-type DIRECTORY)"));
+            assertFalse(generated.profile().contains("(subpath \"/\")"));
+            assertTrue(generated.profile().contains("(allow file-read-metadata"));
+            assertTrue(generated.profile().contains("hw.pagesize_compat"));
+            for (String definition : generated.definitions()) {
+                if (definition.startsWith("-DMETADATA_")) {
+                    java.nio.file.Path ancestor =
+                            java.nio.file.Paths.get(
+                                    definition.substring(definition.indexOf('=') + 1));
+                    assertFalse(
+                            ancestor.equals(workspace.toRealPath().resolve("undeclared-canary")));
+                }
+            }
+            org.junit.jupiter.api.Assertions.assertThrows(
+                    io.github.sandboxdemo.api.SandboxException.class,
+                    () ->
+                            MacOsSeatbeltProfile.validateExecutableReadAccess(
+                                    java.nio.file.Paths.get("/undeclared/tool"), policy));
+            MacOsSeatbeltProfile.validateExecutableReadAccess(
+                    java.nio.file.Paths.get("/usr/bin/true"), policy);
+        } finally {
+            PathPolicyValidator.cleanup(policy);
+        }
+    }
+
+    @Test
     void hostReadPolicyIsExplicit() throws Exception {
         ValidatedPolicy policy =
                 PathPolicyValidator.validate(

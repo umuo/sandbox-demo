@@ -246,3 +246,11 @@ VM 中只映射专用 input/workspace/output，不映射用户 home、SSH key、
 - [ ] 对沙箱代码和部署模型做独立安全审计。
 
 更精确的英文基线见 [SECURITY.md](SECURITY.md)。
+
+## AGT 维护迭代的保证解释
+
+结构化 `SandboxCapabilities.dimensions()` 区分内核强制、best-effort、不支持和未知。字段表示机制，不是当前请求的 readiness 或执行后的回收确认；旧 `FULL` 不应作为任意代码、多租户或资源硬限制的准入依据。
+
+macOS 严格模式的有效权限包含平台运行时根、根目录条目读取、必要路径祖先元数据和 shell 运行时配置。它阻止未声明文件正文读取，但不承诺隐藏所有宿主路径元数据。默认异常、结果和状态字符串隐藏诊断原文；显式调试访问及自定义诊断供应器仍由宿主负责控制。
+
+当前已新增取消后的独立回收状态；macOS 进程树及 Windows 宿主资源仍不能全面确认。严格环境 preset 和逐请求硬资源限额准入尚未实现。原生验收及具体未完成边界见 [AGT 维护进度](agt-maintenance-progress.md)。

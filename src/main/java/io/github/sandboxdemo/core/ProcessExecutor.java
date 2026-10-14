@@ -1,13 +1,14 @@
 package io.github.sandboxdemo.core;
 
+import io.github.sandboxdemo.api.SandboxErrorCode;
 import io.github.sandboxdemo.api.SandboxException;
+import io.github.sandboxdemo.api.SandboxPhase;
 import io.github.sandboxdemo.api.SandboxResult;
 import java.io.IOException;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -96,24 +97,71 @@ public final class ProcessExecutor {
             boolean stderrCharsetAuto)
             throws SandboxException, InterruptedException {
 
-        long started = System.nanoTime();
-        ProcessBuilder builder = new ProcessBuilder(command);
-        builder.directory(policy.workingDirectory().toFile());
-        builder.environment().clear();
-        builder.environment().putAll(environment);
+        return execute(
+                command,
+                policy,
+                environment,
+                standardInput,
+                stdoutConsumer,
+                stderrConsumer,
+                stdoutTextConsumer,
+                stderrTextConsumer,
+                stdoutCharset,
+                stderrCharset,
+                stdoutCharsetAuto,
+                stderrCharsetAuto,
+                false);
+    }
 
+    public static SandboxResult execute(
+            List<String> command,
+            ValidatedPolicy policy,
+            Map<String, String> environment,
+            byte[] standardInput,
+            java.util.function.Consumer<byte[]> stdoutConsumer,
+            java.util.function.Consumer<byte[]> stderrConsumer,
+            java.util.function.Consumer<String> stdoutTextConsumer,
+            java.util.function.Consumer<String> stderrTextConsumer,
+            Charset stdoutCharset,
+            Charset stderrCharset,
+            boolean stdoutCharsetAuto,
+            boolean stderrCharsetAuto,
+            boolean kernelContained)
+            throws SandboxException, InterruptedException {
+        long started = System.nanoTime();
+        ExecutionContext context = ExecutionContext.current();
+        boolean owned = context == null;
+        if (owned) {
+            context = new ExecutionContext(policy.timeout(), Duration.ofSeconds(2));
+            context.beginWorker();
+            context.managedBackend();
+        }
+        final ExecutionContext execution = context;
+        context.checkActive();
+        ExecutionContext.Lease processLease = context.track(ExecutionContext.Resource.PROCESS);
         Process process;
         try {
+            ProcessBuilder builder = new ProcessBuilder(command);
+            builder.directory(policy.workingDirectory().toFile());
+            builder.environment().clear();
+            builder.environment().putAll(environment);
             process = builder.start();
-        } catch (IOException e) {
-            throw new SandboxException("failed to start sandbox backend: " + command.get(0), e);
+        } catch (IOException failure) {
+            processLease.complete(io.github.sandboxdemo.api.SandboxCleanupState.NOT_REQUIRED);
+            if (owned) {
+                context.finishWorker();
+            }
+            throw new SandboxException(
+                    SandboxErrorCode.START_FAILED,
+                    SandboxPhase.START,
+                    "failed to start sandbox backend",
+                    failure);
         }
-
         ExecutorService readers =
                 Executors.newFixedThreadPool(
-                        standardInput.length == 0 ? 2 : 3,
+                        3,
                         runnable -> {
-                            Thread thread = new Thread(runnable, "sandbox-output-reader");
+                            Thread thread = new Thread(runnable, "sandbox-pipe-worker");
                             thread.setDaemon(true);
                             return thread;
                         });
@@ -131,154 +179,214 @@ public final class ProcessExecutor {
                         stderrTextConsumer,
                         stderrCharset,
                         stderrCharsetAuto);
-        Future<?> stdoutTask =
-                readers.submit(
+        Future<?> outTask =
+                submitTracked(
+                        readers,
+                        execution,
                         () -> {
-                            stdout.readFrom(process.getInputStream());
-                            return null;
+                            try (java.io.InputStream input = process.getInputStream()) {
+                                stdout.readFrom(input);
+                            }
+                            return io.github.sandboxdemo.api.SandboxCleanupState.CONFIRMED;
                         });
-        Future<?> stderrTask =
-                readers.submit(
+        Future<?> errTask =
+                submitTracked(
+                        readers,
+                        execution,
                         () -> {
-                            stderr.readFrom(process.getErrorStream());
-                            return null;
+                            try (java.io.InputStream input = process.getErrorStream()) {
+                                stderr.readFrom(input);
+                            }
+                            return io.github.sandboxdemo.api.SandboxCleanupState.CONFIRMED;
                         });
-        Future<?> inputTask = null;
-        if (standardInput.length == 0) {
-            try {
-                process.getOutputStream().close();
-            } catch (IOException ignored) {
-                // The process can exit before the parent closes an empty stdin.
-            }
-        } else {
-            inputTask =
-                    readers.submit(
-                            () -> {
-                                try (java.io.OutputStream input = process.getOutputStream()) {
+        Future<?> inTask =
+                submitTracked(
+                        readers,
+                        execution,
+                        () -> {
+                            java.io.OutputStream input = process.getOutputStream();
+                            boolean closed = true;
+                            try {
+                                try {
                                     input.write(standardInput);
                                     input.flush();
                                 } catch (IOException ignored) {
-                                    // Closing stdin early is a valid child-process behavior.
+                                    /* 子进程提前关闭 stdin 是合法行为。 */
                                 }
-                                return null;
-                            });
-        }
-
-        Set<Object> observedDescendants = ConcurrentHashMap.newKeySet();
+                            } finally {
+                                try {
+                                    input.close();
+                                } catch (IOException uncertainClosure) {
+                                    // 缓冲 close 可能在排空未消费输入时失败；保留旧退出语义，但不伪造关闭证据。
+                                    closed = false;
+                                }
+                            }
+                            return closed
+                                    ? io.github.sandboxdemo.api.SandboxCleanupState.CONFIRMED
+                                    : io.github.sandboxdemo.api.SandboxCleanupState.UNKNOWN;
+                        });
+        Set<Object> descendants = ConcurrentHashMap.newKeySet();
+        boolean interrupted = false;
         boolean timedOut = false;
+        SandboxException captureError = null;
         try {
-            timedOut = !waitAndTrack(process, policy.timeout(), observedDescendants);
-            terminateProcessTree(process, observedDescendants);
-            process.waitFor(5, TimeUnit.SECONDS);
-            awaitReader(stdoutTask, process);
-            awaitReader(stderrTask, process);
-
-            int exitCode = process.isAlive() ? 124 : process.exitValue();
-            return new SandboxResult(
-                    exitCode,
-                    timedOut,
-                    stdout.bytes(),
-                    stderr.bytes(),
-                    stdout.truncated(),
-                    stderr.truncated(),
-                    Duration.ofNanos(System.nanoTime() - started));
-        } catch (InterruptedException e) {
-            terminateProcessTree(process, observedDescendants);
-            throw e;
+            long localDeadline =
+                    System.nanoTime()
+                            + Math.min(policy.timeout().toNanos(), context.remainingNanos());
+            while (true) {
+                descendants.addAll(safeDescendants(processHandle(process)));
+                for (Object child : new ArrayList<>(descendants)) {
+                    descendants.addAll(safeDescendants(child));
+                }
+                if (context.stopReason() != null) {
+                    timedOut =
+                            context.stopReason()
+                                    == io.github.sandboxdemo.api.SandboxTerminationReason.TIMEOUT;
+                    break;
+                }
+                if (!process.isAlive()
+                        && descendants.stream().noneMatch(ProcessExecutor::isHandleAlive)) {
+                    break;
+                }
+                if (localDeadline - System.nanoTime() <= 0) {
+                    context.stop(io.github.sandboxdemo.api.SandboxTerminationReason.TIMEOUT);
+                    timedOut = true;
+                    break;
+                }
+                Thread.sleep(
+                        Math.max(
+                                1,
+                                Math.min(
+                                        20,
+                                        TimeUnit.NANOSECONDS.toMillis(
+                                                localDeadline - System.nanoTime()))));
+            }
+        } catch (InterruptedException callerInterrupted) {
+            interrupted = true;
+            context.stop(io.github.sandboxdemo.api.SandboxTerminationReason.CANCELLED);
         } finally {
-            if (inputTask != null) {
-                inputTask.cancel(true);
-            }
-            try {
-                process.getOutputStream().close();
-            } catch (IOException ignored) {
-                // Process termination normally closes the pipe first.
-            }
-            readers.shutdownNow();
-        }
-    }
-
-    private static boolean waitAndTrack(
-            Process process, Duration timeout, Set<Object> observedDescendants)
-            throws InterruptedException {
-        long deadline = System.nanoTime() + timeout.toNanos();
-        while (true) {
-            if (process.isAlive()) {
-                observedDescendants.addAll(safeDescendants(processHandle(process)));
-            }
-            for (Object descendant :
-                    io.github.sandboxdemo.core.Java8.copyList(observedDescendants)) {
-                if (isHandleAlive(descendant)) {
-                    observedDescendants.addAll(safeDescendants(descendant));
+            // Never close a pipe or invoke Process.destroy on the supervising thread.
+            Thread.interrupted();
+            context.beginCleanup();
+            ExecutionContext.Lease killerLease = context.track(ExecutionContext.Resource.HOST);
+            Thread killer =
+                    new Thread(
+                            () -> {
+                                try {
+                                    for (Object child : descendants) {
+                                        destroyForcibly(child);
+                                    }
+                                    Object root = processHandle(process);
+                                    if (root != null) {
+                                        destroyForcibly(root);
+                                    } else if (process.isAlive()) {
+                                        process.destroyForcibly();
+                                    }
+                                } finally {
+                                    killerLease.complete(
+                                            io.github.sandboxdemo.api.SandboxCleanupState
+                                                    .CONFIRMED);
+                                }
+                            },
+                            "sandbox-process-terminator");
+            killer.setDaemon(true);
+            killer.start();
+            while (process.isAlive() && context.cleanupRemainingNanos() > 0) {
+                try {
+                    process.waitFor(
+                            Math.max(
+                                    1,
+                                    Math.min(
+                                            20,
+                                            TimeUnit.NANOSECONDS.toMillis(
+                                                    context.cleanupRemainingNanos()))),
+                            TimeUnit.MILLISECONDS);
+                } catch (InterruptedException e) {
+                    interrupted = true;
                 }
             }
-            boolean treeAlive =
+            processLease.complete(
                     process.isAlive()
-                            || observedDescendants.stream()
-                                    .anyMatch(ProcessExecutor::isHandleAlive);
-            if (!treeAlive) {
-                return true;
+                            ? io.github.sandboxdemo.api.SandboxCleanupState.FAILED
+                            : kernelContained
+                                    ? io.github.sandboxdemo.api.SandboxCleanupState.CONFIRMED
+                                    : io.github.sandboxdemo.api.SandboxCleanupState.UNKNOWN);
+            for (Future<?> task : new Future<?>[] {outTask, errTask, inTask}) {
+                try {
+                    if (context.cleanupRemainingNanos() > 0) {
+                        task.get(context.cleanupRemainingNanos(), TimeUnit.NANOSECONDS);
+                    }
+                } catch (InterruptedException e) {
+                    interrupted = true;
+                } catch (ExecutionException e) {
+                    captureError =
+                            new SandboxException(
+                                    SandboxErrorCode.OUTPUT_CAPTURE_FAILED,
+                                    SandboxPhase.OUTPUT,
+                                    "failed capturing sandbox pipes",
+                                    e.getCause());
+                } catch (TimeoutException e) {
+                    /* Actual task finally, not Future cancellation, confirms closure. */
+                }
             }
-            long remainingNanos = deadline - System.nanoTime();
-            if (remainingNanos <= 0) {
-                return false;
-            }
-            long waitMillis =
-                    Math.max(1, Math.min(50, TimeUnit.NANOSECONDS.toMillis(remainingNanos)));
-            Thread.sleep(waitMillis);
-        }
-    }
-
-    private static void awaitReader(Future<?> task, Process process)
-            throws SandboxException, InterruptedException {
-        try {
-            task.get(5, TimeUnit.SECONDS);
-        } catch (ExecutionException e) {
-            throw new SandboxException("failed while capturing sandbox output", e.getCause());
-        } catch (TimeoutException e) {
             try {
-                process.getInputStream().close();
-                process.getErrorStream().close();
-            } catch (IOException ignored) {
-                // The timeout error below is the actionable failure.
+                if (killer.isAlive() && context.cleanupRemainingNanos() > 0) {
+                    killer.join(
+                            Math.max(
+                                    1,
+                                    TimeUnit.NANOSECONDS.toMillis(
+                                            context.cleanupRemainingNanos())));
+                }
+            } catch (InterruptedException e) {
+                interrupted = true;
             }
-            task.cancel(true);
-            throw new SandboxException(
-                    "sandbox output pipe remained open after its process tree was terminated", e);
+            readers.shutdownNow();
+            if (owned) {
+                context.finishWorker();
+            }
+            context.endPhaseCleanup();
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
         }
+        if (interrupted
+                && context.stopReason()
+                        != io.github.sandboxdemo.api.SandboxTerminationReason.TIMEOUT) {
+            throw new InterruptedException("sandbox execution interrupted");
+        }
+        if (context.stopReason() == io.github.sandboxdemo.api.SandboxTerminationReason.TIMEOUT) {
+            timedOut = true;
+        }
+        if (captureError != null && context.stopReason() == null) {
+            throw captureError;
+        }
+        int exitCode = process.isAlive() ? 124 : process.exitValue();
+        return new SandboxResult(
+                exitCode,
+                timedOut,
+                stdout.bytes(),
+                stderr.bytes(),
+                stdout.truncated(),
+                stderr.truncated(),
+                Duration.ofNanos(System.nanoTime() - started));
     }
 
-    private static void terminateProcessTree(Process process, Set<Object> observedDescendants) {
-        observedDescendants.addAll(safeDescendants(processHandle(process)));
-        List<Object> descendants = new ArrayList<>(observedDescendants);
-        Collections.reverse(descendants);
-        descendants.stream()
-                .filter(ProcessExecutor::isHandleAlive)
-                .forEach(ProcessExecutor::destroy);
-        if (process.isAlive()) {
-            process.destroy();
-        }
-        try {
-            if (process.isAlive()) {
-                process.waitFor(250, TimeUnit.MILLISECONDS);
-            } else {
-                Thread.sleep(250);
-            }
-            descendants.stream()
-                    .filter(ProcessExecutor::isHandleAlive)
-                    .forEach(ProcessExecutor::destroyForcibly);
-            if (process.isAlive()) {
-                process.destroyForcibly();
-            }
-        } catch (InterruptedException interrupted) {
-            Thread.currentThread().interrupt();
-            descendants.stream()
-                    .filter(ProcessExecutor::isHandleAlive)
-                    .forEach(ProcessExecutor::destroyForcibly);
-            if (process.isAlive()) {
-                process.destroyForcibly();
-            }
-        }
+    private static Future<?> submitTracked(
+            ExecutorService executor,
+            ExecutionContext context,
+            java.util.concurrent.Callable<io.github.sandboxdemo.api.SandboxCleanupState> task) {
+        ExecutionContext.Lease lease = context.track(ExecutionContext.Resource.STREAM);
+        return executor.submit(
+                () -> {
+                    io.github.sandboxdemo.api.SandboxCleanupState state =
+                            io.github.sandboxdemo.api.SandboxCleanupState.UNKNOWN;
+                    try {
+                        state = java.util.Objects.requireNonNull(task.call(), "resource state");
+                        return null;
+                    } finally {
+                        lease.complete(state);
+                    }
+                });
     }
 
     private static Object processHandle(Process process) {

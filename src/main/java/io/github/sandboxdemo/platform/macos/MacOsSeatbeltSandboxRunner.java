@@ -1,7 +1,9 @@
 package io.github.sandboxdemo.platform.macos;
 
 import io.github.sandboxdemo.api.SandboxBackendUnavailableException;
+import io.github.sandboxdemo.api.SandboxErrorCode;
 import io.github.sandboxdemo.api.SandboxException;
+import io.github.sandboxdemo.api.SandboxPhase;
 import io.github.sandboxdemo.api.SandboxRequest;
 import io.github.sandboxdemo.api.SandboxResult;
 import io.github.sandboxdemo.api.SandboxRunner;
@@ -77,15 +79,15 @@ public final class MacOsSeatbeltSandboxRunner implements SandboxRunner {
         return "Seatbelt readiness probe passed: " + SANDBOX_EXEC;
     }
 
+    /** 验证真实 profile 与宿主声明的程序路径，仅运行可信 shell 探针。 */
     @Override
-    public SandboxResult execute(SandboxRequest request)
-            throws SandboxException, InterruptedException {
-
-        if (!Files.isExecutable(SANDBOX_EXEC)) {
-            throw new SandboxBackendUnavailableException(
-                    "macOS Seatbelt launcher is unavailable: " + SANDBOX_EXEC);
+    public void validate(SandboxRequest request) throws SandboxException, InterruptedException {
+        io.github.sandboxdemo.core.ExecutionContext context =
+                io.github.sandboxdemo.core.ExecutionContext.current();
+        if (context != null) {
+            context.managedBackend();
+            context.checkActive();
         }
-
         ValidatedPolicy policy = PathPolicyValidator.validate(request.policy());
         try {
             Map<String, String> environment = EnvironmentPolicy.build(request, policy);
@@ -95,6 +97,38 @@ public final class MacOsSeatbeltSandboxRunner implements SandboxRunner {
                             policy.workingDirectory(),
                             environment,
                             policy.allowPathSearch());
+            MacOsSeatbeltProfile.validateExecutableReadAccess(executable, policy);
+            probeGeneratedProfile(MacOsSeatbeltProfile.generate(policy), policy, environment);
+        } finally {
+            PathPolicyValidator.cleanup(policy);
+        }
+    }
+
+    @Override
+    public SandboxResult execute(SandboxRequest request)
+            throws SandboxException, InterruptedException {
+
+        if (!Files.isExecutable(SANDBOX_EXEC)) {
+            throw new SandboxBackendUnavailableException(
+                    "macOS Seatbelt launcher is unavailable: " + SANDBOX_EXEC);
+        }
+
+        io.github.sandboxdemo.core.ExecutionContext context =
+                io.github.sandboxdemo.core.ExecutionContext.current();
+        if (context != null) {
+            context.managedBackend();
+            context.checkActive();
+        }
+        ValidatedPolicy policy = PathPolicyValidator.validate(request.policy());
+        try {
+            Map<String, String> environment = EnvironmentPolicy.build(request, policy);
+            Path executable =
+                    ExecutableResolver.resolve(
+                            request.command().executable(),
+                            policy.workingDirectory(),
+                            environment,
+                            policy.allowPathSearch());
+            MacOsSeatbeltProfile.validateExecutableReadAccess(executable, policy);
             MacOsSeatbeltProfile.GeneratedProfile generated = MacOsSeatbeltProfile.generate(policy);
 
             probeGeneratedProfile(generated, policy, environment);
@@ -157,49 +191,49 @@ public final class MacOsSeatbeltSandboxRunner implements SandboxRunner {
         probe.add("seatbelt-probe");
         probe.add(marker.toString());
 
-        Process process;
-        try {
-            ProcessBuilder builder = new ProcessBuilder(probe).redirectErrorStream(true);
-            builder.directory(policy.workingDirectory().toFile());
-            builder.environment().clear();
-            builder.environment().putAll(environment);
-            process = builder.start();
-        } catch (IOException e) {
-            throw new SandboxBackendUnavailableException(
-                    "failed to start the macOS Seatbelt readiness probe: " + e.getMessage());
+        java.time.Duration probeTimeout =
+                policy.timeout().compareTo(java.time.Duration.ofSeconds(5)) < 0
+                        ? policy.timeout()
+                        : java.time.Duration.ofSeconds(5);
+        ValidatedPolicy probePolicy =
+                new ValidatedPolicy(
+                        policy.workingDirectory(),
+                        policy.readableRoots(),
+                        policy.writableRoots(),
+                        policy.protectedPaths(),
+                        policy.privateTempDirectory(),
+                        policy.networkPolicy(),
+                        policy.readPolicy(),
+                        policy.deletionPolicy(),
+                        probeTimeout,
+                        8192,
+                        false);
+        SandboxResult result =
+                ProcessExecutor.execute(probe, probePolicy, environment, new byte[0]);
+        if (result.timedOut()) {
+            throw new SandboxException(
+                    SandboxErrorCode.TIMEOUT,
+                    SandboxPhase.PROBE,
+                    "generated Seatbelt profile probe timed out");
         }
-
-        boolean completed = process.waitFor(5, TimeUnit.SECONDS);
-        if (!completed) {
-            process.destroyForcibly();
-            process.waitFor(1, TimeUnit.SECONDS);
-            throw new SandboxBackendUnavailableException(
-                    "macOS Seatbelt readiness probe did not complete");
-        }
-
-        String output;
-        try {
-            output =
-                    new String(
-                            io.github.sandboxdemo.core.Java8.readAllBytes(process.getInputStream()),
-                            StandardCharsets.UTF_8);
-        } catch (IOException e) {
-            throw new SandboxException("failed to read the macOS Seatbelt readiness probe", e);
-        }
-        int exitCode = process.exitValue();
+        int exitCode = result.exitCode();
         if (exitCode == 71 || exitCode == 134) {
             throw new SandboxBackendUnavailableException(
-                    "macOS refused the generated Seatbelt profile (exit="
+                    SandboxErrorCode.BACKEND_UNAVAILABLE,
+                    SandboxPhase.PROBE,
+                    "generated Seatbelt profile refused (exit="
                             + exitCode
                             + "): "
-                            + output.trim());
+                            + result.stderrUtf8());
         }
-        if (exitCode != 0) {
+        if (exitCode != 0 || result.stdoutTruncated() || result.stderrTruncated()) {
             throw new SandboxException(
-                    "macOS Seatbelt profile probe failed (exit="
+                    SandboxErrorCode.BACKEND_UNAVAILABLE,
+                    SandboxPhase.PROBE,
+                    "generated Seatbelt probe failed (exit="
                             + exitCode
                             + "): "
-                            + output.trim());
+                            + result.stderrUtf8());
         }
     }
 }

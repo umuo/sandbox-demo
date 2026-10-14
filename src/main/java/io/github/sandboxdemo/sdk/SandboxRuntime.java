@@ -4,8 +4,11 @@ import io.github.sandboxdemo.api.DeletionPolicy;
 import io.github.sandboxdemo.api.NetworkPolicy;
 import io.github.sandboxdemo.api.ReadPolicy;
 import io.github.sandboxdemo.api.SandboxCapabilities;
+import io.github.sandboxdemo.api.SandboxCapability;
+import io.github.sandboxdemo.api.SandboxCapabilitySupport;
 import io.github.sandboxdemo.api.SandboxEnforcement;
 import io.github.sandboxdemo.api.SandboxException;
+import io.github.sandboxdemo.api.SandboxGuarantee;
 import io.github.sandboxdemo.api.SandboxPlatform;
 import io.github.sandboxdemo.api.SandboxRuntimeStatus;
 import io.github.sandboxdemo.platform.linux.LinuxBubblewrapSandboxRunner;
@@ -13,6 +16,8 @@ import io.github.sandboxdemo.platform.macos.MacOsSeatbeltSandboxRunner;
 import io.github.sandboxdemo.platform.windows.WindowsRestrictedTokenSandboxRunner;
 import io.github.sandboxdemo.platform.windows.WindowsSandboxSetup;
 import java.nio.file.Path;
+import java.util.EnumMap;
+import java.util.Map;
 import java.util.Set;
 
 /** SDK lifecycle and readiness facade. Setup operations never run implicitly during execution. */
@@ -80,7 +85,71 @@ public final class SandboxRuntime {
                 setupWindowsBackend,
                 platform == SandboxPlatform.WINDOWS
                         ? SandboxEnforcement.PARTIAL
-                        : SandboxEnforcement.FULL);
+                        : SandboxEnforcement.FULL,
+                capabilityDimensions(platform, backendName));
+    }
+
+    private static Map<SandboxCapability, SandboxCapabilitySupport> capabilityDimensions(
+            SandboxPlatform platform, String backendName) {
+        Map<SandboxCapability, SandboxCapabilitySupport> result =
+                new EnumMap<>(SandboxCapability.class);
+        boolean linux = platform == SandboxPlatform.LINUX && "linux-bubblewrap".equals(backendName);
+        boolean mac = platform == SandboxPlatform.MACOS && "macos-seatbelt".equals(backendName);
+        boolean dedicated =
+                platform == SandboxPlatform.WINDOWS
+                        && "windows-dedicated-user-restricted-token".equals(backendName);
+        boolean windows =
+                platform == SandboxPlatform.WINDOWS
+                        && (dedicated || "windows-restricted-token".equals(backendName));
+        if (!linux && !mac && !windows) {
+            return result;
+        }
+        for (SandboxCapability capability : SandboxCapability.values()) {
+            result.put(
+                    capability, new SandboxCapabilitySupport(SandboxGuarantee.UNSUPPORTED, "none"));
+        }
+        result.put(
+                SandboxCapability.STRICT_READ,
+                new SandboxCapabilitySupport(
+                        windows ? SandboxGuarantee.UNSUPPORTED : SandboxGuarantee.KERNEL,
+                        linux ? "mount-namespace" : mac ? "seatbelt-with-runtime-roots" : "none"));
+        result.put(
+                SandboxCapability.WRITE_ISOLATION,
+                new SandboxCapabilitySupport(
+                        SandboxGuarantee.KERNEL,
+                        linux ? "mount-namespace" : mac ? "seatbelt" : "restricted-token-and-acl"));
+        result.put(
+                SandboxCapability.NETWORK_DENY,
+                new SandboxCapabilitySupport(
+                        windows && !dedicated
+                                ? SandboxGuarantee.UNSUPPORTED
+                                : SandboxGuarantee.KERNEL,
+                        linux
+                                ? "seccomp"
+                                : mac
+                                        ? "seatbelt"
+                                        : dedicated ? "dedicated-account-firewall" : "none"));
+        result.put(
+                SandboxCapability.PROCESS_TREE_TERMINATION,
+                new SandboxCapabilitySupport(
+                        mac ? SandboxGuarantee.BEST_EFFORT : SandboxGuarantee.KERNEL,
+                        linux
+                                ? "pid-namespace"
+                                : mac ? "java-descendant-observation" : "job-object"));
+        result.put(
+                SandboxCapability.TEMP_CLEANUP,
+                new SandboxCapabilitySupport(SandboxGuarantee.BEST_EFFORT, "filesystem-delete"));
+        if (windows) {
+            result.put(
+                    SandboxCapability.MEMORY_LIMIT,
+                    new SandboxCapabilitySupport(
+                            SandboxGuarantee.KERNEL, "job-object-host-configured"));
+            result.put(
+                    SandboxCapability.PROCESS_LIMIT,
+                    new SandboxCapabilitySupport(
+                            SandboxGuarantee.KERNEL, "job-object-host-configured"));
+        }
+        return result;
     }
 
     static SandboxRuntimeStatus status(
@@ -113,7 +182,10 @@ public final class SandboxRuntime {
             Thread.currentThread().interrupt();
             return new SandboxRuntimeStatus(capabilities, false, "readiness check interrupted");
         } catch (Exception error) {
-            String message = error.getMessage();
+            String message =
+                    error instanceof SandboxException
+                            ? error.getMessage()
+                            : "Sandbox readiness failed";
             return new SandboxRuntimeStatus(
                     capabilities,
                     false,

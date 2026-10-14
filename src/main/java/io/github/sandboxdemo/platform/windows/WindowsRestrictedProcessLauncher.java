@@ -11,8 +11,10 @@ import com.sun.jna.WString;
 import com.sun.jna.platform.win32.BaseTSD;
 import com.sun.jna.ptr.IntByReference;
 import com.sun.jna.ptr.PointerByReference;
+import io.github.sandboxdemo.api.SandboxCleanupState;
 import io.github.sandboxdemo.api.SandboxException;
 import io.github.sandboxdemo.api.SandboxResult;
+import io.github.sandboxdemo.core.ExecutionContext;
 import io.github.sandboxdemo.core.OutputCallbacks;
 import io.github.sandboxdemo.core.ValidatedPolicy;
 import java.io.ByteArrayOutputStream;
@@ -29,12 +31,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
 
 /** Launches a suspended process under a write-restricted token and Job Object. */
@@ -202,6 +201,21 @@ final class WindowsRestrictedProcessLauncher {
         WindowsNative.PROCESS_INFORMATION processInfo = null;
         ExecutorService readers = null;
         WindowsPrivateDesktop desktop = null;
+        ExecutionContext context = ExecutionContext.current();
+        boolean owned = context == null;
+        if (owned) {
+            context = new ExecutionContext(policy.timeout(), Duration.ofSeconds(2));
+            context.beginWorker();
+            context.managedBackend();
+        }
+        final ExecutionContext execution = context;
+        ExecutionContext previous = ExecutionContext.attach(context);
+        ExecutionContext.Lease processLease = context.track(ExecutionContext.Resource.PROCESS);
+        ExecutionContext.Lease hostLease = context.track(ExecutionContext.Resource.HOST);
+        SandboxCleanupState jobState = SandboxCleanupState.UNKNOWN;
+        WindowsPipe stdoutOwner = null;
+        WindowsPipe stderrOwner = null;
+        WindowsPipe stdinOwner = null;
         Map<String, String> completeEnvironment = null;
 
         try {
@@ -252,6 +266,7 @@ final class WindowsRestrictedProcessLauncher {
             Memory environmentBlock = environmentBlock(completeEnvironment);
             processInfo = new WindowsNative.PROCESS_INFORMATION();
 
+            context.checkActive();
             boolean created =
                     Advapi32.INSTANCE.CreateProcessAsUserW(
                             restrictedToken,
@@ -278,6 +293,7 @@ final class WindowsRestrictedProcessLauncher {
                 Kernel32.INSTANCE.TerminateJobObject(job, 125);
                 throw win32("AssignProcessToJobObject", error);
             }
+            context.checkActive();
             if (Kernel32.INSTANCE.ResumeThread(processInfo.hThread) == -1) {
                 int error = Native.getLastError();
                 Kernel32.INSTANCE.TerminateJobObject(job, 125);
@@ -293,8 +309,14 @@ final class WindowsRestrictedProcessLauncher {
             close(stdinRead);
             stdinRead = null;
 
-            Pointer capturedStdout = stdoutRead;
-            Pointer capturedStderr = stderrRead;
+            stdoutOwner = new WindowsPipe(stdoutRead);
+            stderrOwner = new WindowsPipe(stderrRead);
+            stdinOwner = new WindowsPipe(stdinWrite.getAndSet(null));
+            stdoutRead = null;
+            stderrRead = null;
+            final WindowsPipe capturedStdout = stdoutOwner;
+            final WindowsPipe capturedStderr = stderrOwner;
+            final WindowsPipe capturedStdin = stdinOwner;
             readers =
                     Executors.newFixedThreadPool(
                             3,
@@ -305,52 +327,58 @@ final class WindowsRestrictedProcessLauncher {
                                 return thread;
                             });
             Future<CapturedOutput> stdoutTask =
-                    readers.submit(
-                            () ->
-                                    readPipe(
-                                            capturedStdout,
+                    WindowsExecutionSupport.submit(
+                            readers,
+                            execution,
+                            () -> {
+                                try {
+                                    return readPipe(
+                                            capturedStdout.handle(),
                                             policy.maxOutputBytes(),
                                             stdoutConsumer,
                                             stdoutTextConsumer,
                                             stdoutCharset,
-                                            stdoutCharsetAuto));
+                                            stdoutCharsetAuto);
+                                } finally {
+                                    capturedStdout.close();
+                                }
+                            });
             Future<CapturedOutput> stderrTask =
-                    readers.submit(
-                            () ->
-                                    readPipe(
-                                            capturedStderr,
+                    WindowsExecutionSupport.submit(
+                            readers,
+                            execution,
+                            () -> {
+                                try {
+                                    return readPipe(
+                                            capturedStderr.handle(),
                                             policy.maxOutputBytes(),
                                             stderrConsumer,
                                             stderrTextConsumer,
                                             stderrCharset,
-                                            stderrCharsetAuto));
-            Pointer capturedStdin = stdinWrite.get();
+                                            stderrCharsetAuto);
+                                } finally {
+                                    capturedStderr.close();
+                                }
+                            });
             Future<?> inputTask =
-                    readers.submit(
+                    WindowsExecutionSupport.submit(
+                            readers,
+                            execution,
                             () -> {
                                 try {
-                                    writePipe(capturedStdin, standardInput);
+                                    writePipe(capturedStdin.handle(), standardInput);
                                 } finally {
-                                    close(stdinWrite.getAndSet(null));
+                                    capturedStdin.close();
                                 }
                                 return null;
                             });
 
-            int waitMillis = (int) Math.min(Integer.MAX_VALUE, policy.timeout().toMillis());
-            int wait = Kernel32.INSTANCE.WaitForSingleObject(processInfo.hProcess, waitMillis);
+            int wait = WindowsExecutionSupport.waitForProcess(processInfo.hProcess, context);
             boolean timedOut = wait == WAIT_TIMEOUT;
-            if (timedOut) {
-                Kernel32.INSTANCE.TerminateJobObject(job, 124);
-                Kernel32.INSTANCE.WaitForSingleObject(processInfo.hProcess, 5_000);
-            } else if (wait != WAIT_OBJECT_0) {
-                throw win32("WaitForSingleObject");
-            }
-
-            // Kill background descendants after the requested root command has exited.
-            Kernel32.INSTANCE.TerminateJobObject(job, timedOut ? 124 : 0);
-            awaitInput(inputTask);
-            CapturedOutput out = await(stdoutTask);
-            CapturedOutput err = await(stderrTask);
+            jobState = WindowsExecutionSupport.terminateJob(job, context);
+            WindowsExecutionSupport.await(inputTask, context);
+            CapturedOutput out = WindowsExecutionSupport.await(stdoutTask, context);
+            CapturedOutput err = WindowsExecutionSupport.await(stderrTask, context);
             IntByReference exitCode = new IntByReference(timedOut ? 124 : -1);
             if (!Kernel32.INSTANCE.GetExitCodeProcess(processInfo.hProcess, exitCode)) {
                 throw win32("GetExitCodeProcess");
@@ -368,8 +396,24 @@ final class WindowsRestrictedProcessLauncher {
             if (readers != null) {
                 readers.shutdownNow();
             }
-            if (job != null) {
-                Kernel32.INSTANCE.TerminateJobObject(job, 125);
+            if (job != null && jobState != SandboxCleanupState.CONFIRMED) {
+                jobState = WindowsExecutionSupport.terminateJob(job, context);
+            }
+            SandboxCleanupState rootState =
+                    WindowsExecutionSupport.terminateRoot(
+                            processInfo == null ? null : processInfo.hProcess, context);
+            processLease.complete(
+                    processInfo == null || isInvalid(processInfo.hProcess)
+                            ? SandboxCleanupState.NOT_REQUIRED
+                            : rootState == SandboxCleanupState.CONFIRMED ? jobState : rootState);
+            if (stdoutOwner != null) {
+                stdoutOwner.cancel();
+            }
+            if (stderrOwner != null) {
+                stderrOwner.cancel();
+            }
+            if (stdinOwner != null) {
+                stdinOwner.cancel();
             }
             if (attributeHandles != null) {
                 Kernel32.INSTANCE.DeleteProcThreadAttributeList(attributeHandles.attributeList());
@@ -389,6 +433,13 @@ final class WindowsRestrictedProcessLauncher {
             if (desktop != null) {
                 desktop.close();
             }
+            // Desktop rollback and generic CloseHandle failures are not yet independently proven.
+            hostLease.complete(SandboxCleanupState.UNKNOWN);
+            if (owned) {
+                context.finishWorker();
+            }
+            context.endPhaseCleanup();
+            ExecutionContext.restore(previous);
         }
     }
 
@@ -851,21 +902,6 @@ final class WindowsRestrictedProcessLauncher {
         }
     }
 
-    private static void awaitInput(Future<?> task) throws SandboxException, InterruptedException {
-        try {
-            task.get(5, TimeUnit.SECONDS);
-        } catch (ExecutionException e) {
-            Throwable cause = e.getCause();
-            if (cause instanceof SandboxException) {
-                throw (SandboxException) cause;
-            }
-            throw new SandboxException("failed to provide Windows sandbox stdin", cause);
-        } catch (TimeoutException e) {
-            task.cancel(true);
-            throw new SandboxException("Windows sandbox stdin pipe did not close", e);
-        }
-    }
-
     private static CapturedOutput readPipe(
             Pointer pipe,
             int limit,
@@ -906,19 +942,6 @@ final class WindowsRestrictedProcessLauncher {
             callbacks.complete();
         }
         return new CapturedOutput(output.toByteArray(), truncated);
-    }
-
-    private static CapturedOutput await(Future<CapturedOutput> task)
-            throws SandboxException, InterruptedException {
-        try {
-            return task.get();
-        } catch (ExecutionException e) {
-            Throwable cause = e.getCause();
-            if (cause instanceof SandboxException) {
-                throw (SandboxException) cause;
-            }
-            throw new SandboxException("failed to capture Windows sandbox output", cause);
-        }
     }
 
     private static SandboxException win32(String operation) {

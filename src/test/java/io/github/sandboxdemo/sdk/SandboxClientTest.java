@@ -160,7 +160,8 @@ class SandboxClientTest {
                         SandboxBackendUnavailableException.class,
                         () -> client.execute(unsupported));
 
-        assertTrue(error.getMessage().contains("does not support network policy ALLOW"));
+        assertEquals(io.github.sandboxdemo.api.SandboxErrorCode.POLICY_UNSUPPORTED, error.code());
+        assertEquals(io.github.sandboxdemo.api.SandboxPhase.ADMISSION, error.phase());
         assertFalse(executed.get());
     }
 
@@ -207,7 +208,7 @@ class SandboxClientTest {
                         SandboxBackendUnavailableException.class,
                         () -> client.execute(unsupported));
 
-        assertTrue(error.getMessage().contains("does not support deletion policy DENY"));
+        assertEquals(io.github.sandboxdemo.api.SandboxErrorCode.POLICY_UNSUPPORTED, error.code());
         assertFalse(executed.get());
     }
 }

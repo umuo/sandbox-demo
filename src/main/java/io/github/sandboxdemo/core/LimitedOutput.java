@@ -46,24 +46,28 @@ final class LimitedOutput {
                 if (count > 0) {
                     callbacks.accept(Arrays.copyOf(buffer, count));
                 }
-                int remaining = limit - bytes.size();
-                if (remaining > 0) {
-                    bytes.write(buffer, 0, Math.min(remaining, count));
-                }
-                if (count > remaining) {
-                    truncated = true;
-                }
+                retain(buffer, count);
             }
         } finally {
             callbacks.complete();
         }
     }
 
-    byte[] bytes() {
+    private synchronized void retain(byte[] buffer, int count) {
+        int remaining = limit - bytes.size();
+        if (remaining > 0) {
+            bytes.write(buffer, 0, Math.min(remaining, count));
+        }
+        if (count > remaining) {
+            truncated = true;
+        }
+    }
+
+    synchronized byte[] bytes() {
         return bytes.toByteArray();
     }
 
-    boolean truncated() {
+    synchronized boolean truncated() {
         return truncated;
     }
 }

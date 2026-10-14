@@ -83,7 +83,18 @@ final class WindowsNative {
         boolean SetInformationJobObject(
                 Pointer job, int informationClass, Pointer information, int informationLength);
 
+        boolean QueryInformationJobObject(
+                Pointer job,
+                int informationClass,
+                Pointer information,
+                int informationLength,
+                IntByReference returnLength);
+
+        boolean CancelIoEx(Pointer handle, Pointer overlapped);
+
         boolean AssignProcessToJobObject(Pointer job, Pointer process);
+
+        boolean TerminateProcess(Pointer process, int exitCode);
 
         boolean TerminateJobObject(Pointer job, int exitCode);
 
@@ -402,6 +413,27 @@ final class WindowsNative {
             Length = (short) lengthBytes;
             MaximumLength = (short) (lengthBytes + Native.WCHAR_SIZE);
         }
+    }
+
+    @Structure.FieldOrder({
+        "TotalUserTime",
+        "TotalKernelTime",
+        "ThisPeriodTotalUserTime",
+        "ThisPeriodTotalKernelTime",
+        "TotalPageFaultCount",
+        "TotalProcesses",
+        "ActiveProcesses",
+        "TotalTerminatedProcesses"
+    })
+    public static class JOBOBJECT_BASIC_ACCOUNTING_INFORMATION extends Structure {
+        public long TotalUserTime;
+        public long TotalKernelTime;
+        public long ThisPeriodTotalUserTime;
+        public long ThisPeriodTotalKernelTime;
+        public int TotalPageFaultCount;
+        public int TotalProcesses;
+        public int ActiveProcesses;
+        public int TotalTerminatedProcesses;
     }
 
     @Structure.FieldOrder({

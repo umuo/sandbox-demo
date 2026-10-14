@@ -15,6 +15,7 @@ final class MacOsSeatbeltProfile {
                     "/usr",
                     "/bin",
                     "/sbin",
+                    "/private/var/select/sh",
                     "/private/etc/passwd",
                     "/private/etc/group",
                     "/private/etc/hosts",
@@ -29,6 +30,8 @@ final class MacOsSeatbeltProfile {
                     "(deny default)",
                     "",
                     "; The policy is inherited by descendants.",
+                    "; dyld ignition reads the root directory itself, never its descendants.",
+                    "(allow file-read-data (require-all (literal \"/\") (vnode-type DIRECTORY)))",
                     "(allow process-exec)",
                     "(allow process-fork)",
                     "(allow signal (target same-sandbox))",
@@ -49,6 +52,7 @@ final class MacOsSeatbeltProfile {
                     "  (sysctl-name \"hw.memsize\")",
                     "  (sysctl-name \"hw.ncpu\")",
                     "  (sysctl-name \"hw.pagesize\")",
+                    "  (sysctl-name \"hw.pagesize_compat\")",
                     "  (sysctl-name \"hw.physicalcpu\")",
                     "  (sysctl-name \"hw.physicalcpu_max\")",
                     "  (sysctl-name-prefix \"hw.optional.arm.\")",
@@ -81,6 +85,21 @@ final class MacOsSeatbeltProfile {
 
     private MacOsSeatbeltProfile() {}
 
+    static void validateExecutableReadAccess(java.nio.file.Path executable, ValidatedPolicy policy)
+            throws io.github.sandboxdemo.api.SandboxException {
+        if (policy.readPolicy() == ReadPolicy.HOST
+                || policy.readableRoots().stream().anyMatch(executable::startsWith)
+                || RUNTIME_ROOTS.stream()
+                        .map(java.nio.file.Paths::get)
+                        .anyMatch(executable::startsWith)) {
+            return;
+        }
+        throw new io.github.sandboxdemo.api.SandboxException(
+                io.github.sandboxdemo.api.SandboxErrorCode.POLICY_INVALID,
+                io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                "executable is outside effective readable roots: " + executable);
+    }
+
     static GeneratedProfile generate(ValidatedPolicy policy) {
         StringBuilder profile = new StringBuilder(BASE_PROFILE);
         List<String> definitions = new ArrayList<>();
@@ -96,6 +115,32 @@ final class MacOsSeatbeltProfile {
                 String name = "READABLE_" + i;
                 profile.append("  (subpath (param \"").append(name).append("\"))\n");
                 definitions.add("-D" + name + "=" + policy.readableRoots().get(i));
+            }
+            profile.append(")\n");
+            // realpath/getcwd 需要查询已声明路径的祖先；仅元数据，不开放目录内容或文件数据。
+            java.util.Set<String> ancestors = new java.util.TreeSet<>();
+            ancestors.add("/");
+            ancestors.add("/var");
+            ancestors.add("/etc");
+            ancestors.add("/tmp");
+            List<java.nio.file.Path> paths = new ArrayList<>(policy.readableRoots());
+            paths.addAll(policy.writableRoots());
+            for (String runtimeRoot : RUNTIME_ROOTS) {
+                paths.add(java.nio.file.Paths.get(runtimeRoot));
+            }
+            for (java.nio.file.Path path : paths) {
+                for (java.nio.file.Path parent = path.getParent();
+                        parent != null;
+                        parent = parent.getParent()) {
+                    ancestors.add(parent.toString());
+                }
+            }
+            profile.append("(allow file-read-metadata\n");
+            int index = 0;
+            for (String ancestor : ancestors) {
+                String name = "METADATA_" + index++;
+                profile.append("  (literal (param \"").append(name).append("\"))\n");
+                definitions.add("-D" + name + "=" + ancestor);
             }
             profile.append(")\n");
         }

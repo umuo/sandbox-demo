@@ -54,6 +54,8 @@ python3 -m venv .venv-docs
 
 入口见 [docs/index.md](docs/index.md)，站点开发说明见 [docs/site-development.md](docs/site-development.md)。
 
+Java AGT 接入的已复现问题、SDK 维护优先级与验收条件见 [接入需求与维护验收](docs/agt-integration-requirements.md)。
+
 ## 构建
 
 ```bash

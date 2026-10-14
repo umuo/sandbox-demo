@@ -1,6 +1,8 @@
 package io.github.sandboxdemo.core;
 
+import io.github.sandboxdemo.api.SandboxErrorCode;
 import io.github.sandboxdemo.api.SandboxException;
+import io.github.sandboxdemo.api.SandboxPhase;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -32,6 +34,8 @@ public final class ExecutableResolver {
 
         if (!allowPathSearch) {
             throw new SandboxException(
+                    SandboxErrorCode.START_FAILED,
+                    SandboxPhase.PREPARATION,
                     "bare executable names are disabled; pass an absolute path or explicitly "
                             + "enable PATH search: "
                             + executable);
@@ -39,7 +43,10 @@ public final class ExecutableResolver {
 
         String pathValue = environment.getOrDefault("PATH", System.getenv("PATH"));
         if (pathValue == null || io.github.sandboxdemo.core.Java8.isBlank(pathValue)) {
-            throw new SandboxException("PATH is empty; cannot resolve executable: " + executable);
+            throw new SandboxException(
+                    SandboxErrorCode.START_FAILED,
+                    SandboxPhase.PREPARATION,
+                    "PATH is empty; cannot resolve executable: " + executable);
         }
 
         List<String> names = candidateNames(executable, environment);
@@ -59,6 +66,8 @@ public final class ExecutableResolver {
             }
         }
         throw new SandboxException(
+                SandboxErrorCode.START_FAILED,
+                SandboxPhase.PREPARATION,
                 "executable was not found on trusted PATH entries: " + executable);
     }
 
@@ -82,6 +91,8 @@ public final class ExecutableResolver {
         Path normalized = path.toAbsolutePath().normalize();
         if (!Files.isRegularFile(normalized) || !isExecutable(normalized)) {
             throw new SandboxException(
+                    SandboxErrorCode.START_FAILED,
+                    SandboxPhase.PREPARATION,
                     "executable does not exist or is not executable: " + normalized);
         }
         return realPath(normalized);
@@ -95,7 +106,11 @@ public final class ExecutableResolver {
         try {
             return path.toRealPath();
         } catch (IOException e) {
-            throw new SandboxException("failed to resolve executable: " + path, e);
+            throw new SandboxException(
+                    SandboxErrorCode.START_FAILED,
+                    SandboxPhase.PREPARATION,
+                    "failed to resolve executable: " + path,
+                    e);
         }
     }
 }

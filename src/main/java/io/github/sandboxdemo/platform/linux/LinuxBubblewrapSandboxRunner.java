@@ -108,6 +108,12 @@ public final class LinuxBubblewrapSandboxRunner implements SandboxRunner {
     public SandboxResult execute(SandboxRequest request)
             throws SandboxException, InterruptedException {
 
+        io.github.sandboxdemo.core.ExecutionContext context =
+                io.github.sandboxdemo.core.ExecutionContext.current();
+        if (context != null) {
+            context.managedBackend();
+            context.checkActive();
+        }
         ValidatedPolicy policy = PathPolicyValidator.validate(request.policy());
         try {
             Map<String, String> environment = EnvironmentPolicy.build(request, policy);
@@ -198,7 +204,8 @@ public final class LinuxBubblewrapSandboxRunner implements SandboxRunner {
                             request.stdoutCharset(),
                             request.stderrCharset(),
                             request.stdoutCharsetAuto(),
-                            request.stderrCharsetAuto());
+                            request.stderrCharsetAuto(),
+                            true);
             if (isBubblewrapBootstrapFailure(result)) {
                 throw new SandboxBackendUnavailableException(
                         "bubblewrap is installed but the host refused its namespace setup: "

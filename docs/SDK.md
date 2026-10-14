@@ -246,3 +246,94 @@ SandboxClient client = SandboxClient.builder()
 - major：公共 API、默认安全策略或 Windows worker 协议不兼容。
 
 升级时不能只替换 Windows runtime 中的某一个 JAR。始终从同一 SDK 版本重新执行 setup。
+
+## AGT 接入维护中的新增契约
+
+以下 API 属于当前开发源码，尚未发布到 `0.1.0-alpha.1`，消费时须使用本地构建的制品。
+
+### 实际策略预检
+
+在授权、参数改写之后，预算提交之前调用：
+
+```java
+SandboxRequest request = SandboxRequest.of(policy, command);
+client.validate(request);
+// 宿主在此提交执行预算。
+SandboxResult result = client.execute(request);
+```
+
+`validate` 先检查静态策略兼容性，再调用后端可信探针，不运行目标命令、不调用请求的输出监听器。当前 macOS 后端实现了此接口；Linux、Windows 和未实现该方法的旧自定义 runner 明确返回 `POLICY_UNSUPPORTED / PROBE`，不会把基础 readiness 冒充策略预检。
+
+macOS 探针使用实际 profile、工作目录、环境和私有临时目录，创建后删除固定 marker。执行时仍重新预检。预检通过不代表任意目标程序的全部动态依赖已验证，也不能消除预检与执行之间的文件系统竞态。程序必须位于平台运行时根或宿主声明的可读根；JDK 安装目录需由宿主显式声明。
+
+### 错误分类与诊断
+
+使用 `SandboxException.code()` 和 `phase()` 映射错误，不再匹配 `getMessage()`。当前已分类的入口包括：策略不支持、路径准备失败、可执行文件解析失败、共享进程启动失败、输出捕获失败和 macOS profile 探针失败。旧构造器、尚未迁移的内部错误及自定义后端保守返回 `UNKNOWN`；`OUTPUT_LIMIT` 分类尚不代表超限终止已实现；取消及清理状态见 SDK-02 部分。
+
+旧构造器和方法签名保留，但诊断行为有明确变化：
+
+- `getMessage()`、`toString()` 和普通堆栈打印只显示错误码与阶段，不显示原始诊断或 cause；`getCause()` 默认返回 null。
+- 原始内容改为显式 `debugMessage()`、`debugCause()`，仅可用于受控调试，不能进入默认审计或产品响应。
+- `SandboxResult.toString()` 仅显示输出字节数、状态与耗时；读取正文仍需显式调用 `stdout()` / `stderr()` 等接口。
+- `SandboxRuntimeStatus.toString()` 隐藏诊断字符串；自定义状态供应器的 `diagnostic()` 仍由宿主负责内容准入。
+
+`successful()` 保持旧语义：只检查退出码与 timeout。AGT 仍须自行检查截断；SDK-02 新增独立回收状态；不能仅据此旧方法宣布安全交付完成。
+
+### 能力维度
+
+```java
+SandboxCapabilitySupport support = client.capabilities()
+        .support(SandboxCapability.PROCESS_TREE_TERMINATION);
+SandboxGuarantee guarantee = support.guarantee();
+String mechanism = support.mechanism();
+```
+
+`dimensions()` 是不可变快照。保证级别包括 `KERNEL`、`BEST_EFFORT`、`UNSUPPORTED`、`UNKNOWN`。旧 capability 构造器的所有新增维度默认 UNKNOWN，不能依据平台猜测自定义后端能力。
+
+这些字段描述强制机制，不代表当前请求已经通过预检、进程已经回收或平台已完成原生验收。Windows 默认后端不支持严格读取与网络拒绝；macOS 后代监督和临时目录删除是 best-effort。Windows 内存与进程数限制描述现有 Job 的宿主配置，尚未提供逐请求资源限额准入 API。旧 `FULL` 也不代表 VM 隔离或全部资源都有硬限制。
+
+本轮证据和未完成任务见 [AGT 维护进度](agt-maintenance-progress.md)。
+
+## SDK-02：执行句柄、取消与回收
+
+异步接口仍保持 Java 8 兼容。工作池由宿主提供，必须使用有限队列和 `AbortPolicy`，SDK 拒绝无界队列及 `CallerRunsPolicy`，避免提交操作在调用线程执行工具。
+
+```java
+ThreadPoolExecutor workers = new ThreadPoolExecutor(
+        2, 2, 0L, TimeUnit.MILLISECONDS,
+        new ArrayBlockingQueue<Runnable>(16),
+        new ThreadPoolExecutor.AbortPolicy());
+SandboxClient client = SandboxClient.builder()
+        .cleanupGrace(Duration.ofSeconds(2))
+        .build();
+SandboxExecution execution = client.start(request, workers);
+String executionId = execution.executionId();
+execution.cancel();
+SandboxCompletion completion = execution.await(Duration.ofSeconds(3));
+SandboxCleanupResult currentCleanup = execution.cleanup();
+boolean deliverable = completion.completeSuccessful();
+// currentCleanup.confirmed() 为 false 时，宿主保留租户执行容量并协调回收。
+// 宿主负责关闭或复用 workers；关闭工作池本身不证明沙箱资源已回收。
+```
+
+新增类型均位于 `api` 包。`SandboxExecution` 提供 `cancel()`、只读 `completion()` 快照、有界 `await(Duration)`、`await()` 以及独立 `cleanup()`；没有可由调用方随意 `complete/cancel` 的公开 Future。
+
+- `completion.reason()` 区分 `EXITED`、`TIMEOUT`、`CANCELLED`、`FAILED`；非零目标退出码仍属于 EXITED，退出成功与否另看 result。
+- `cleanup()` 分别报告进程、管道、SDK 临时文件与宿主资源的 `CONFIRMED / NOT_REQUIRED / UNKNOWN / FAILED`，同时报告后台执行是否结束。
+- `completion.cleanup()` 是交付时的不可变快照。后台管道稍后退出时，`execution.cleanup()` 可以更新，而旧 completion 不会被覆盖。
+- `completeSuccessful()` 同时要求零退出、未超时/取消、无截断、无错误，以及所有资源已确认回收。旧 `SandboxResult.successful()` 语义不变。
+- `cancel()` 只请求停止；返回 true 不意味着已回收。等待方法被调用方中断，或 `await(Duration)` 提前超时，只终止等待，不隐式取消执行。
+
+超时从句柄创建时开始，包含排队、目录准备、实际 profile 探针、启动和执行。统一清理宽限默认 2 秒，允许配置大于零至 30 秒。取消后的有界交付以该清理期限为截止点，未完成部分报告 UNKNOWN；超时后的有界交付使用原 deadline 加宽限。正常进程退出后的管道排空也只使用共享宽限，不为 stdout、stderr、stdin 分别叠加等待。
+
+取消使用控制标志。监督器和 Windows 原生等待短轮询该标志；deadline 线程不会同步关闭管道、销毁进程或执行任意用户的中断 I/O hook。启动或文件系统调用卡住时，句柄仍交付 UNKNOWN，实际后台工作可能继续；资源状态不能据 Future/句柄交付完成推断为已释放。传统 `execute` 继续是阻塞接口，有界交付应使用 `start`。
+
+### 平台强度和扩展后端
+
+macOS 仅通过 Java 观察后代，Java 8 下没有 ProcessHandle，且 JDK 17/21 也不能证明未观察到的脱离后代已结束。因此当前 macOS 的进程树回收保持 UNKNOWN；目标 root 已结束或管道已关闭都不能提升成完整树保证。
+
+Linux 使用 PID namespace 边界；Windows 只有在原生 `QueryInformationJobObject` 确认活跃进程数为零、root 也结束时，才确认受监督 Job 回收。Windows 的专用账户 worker 与默认原生 launcher 使用同一停止信号和宽限；管道实际 I/O 线程负责关闭句柄，监督器只请求取消 I/O。Windows desktop/ACL 回滚和普通 handle 关闭仍缺少完整证据，宿主资源保持 UNKNOWN，不能宣称全面回收成功。
+
+原有自定义 runner 的 `execute(request)` 继续可用。新增默认 `execute(request, control)` 在进入前检查信号；后端可覆盖该方法并轮询 `SandboxExecutionControl`，通过 `reportCleanup` 明确上报真实回收证据。SDK 仍独立判断自己的工作线程是否结束；上报值不能覆盖未完成的 SDK 资源账本。旧后端即使返回成功，也不自动获得回收证据。任何不响应停止的自定义后端，在 deadline 后得到有界 UNKNOWN 交付，不能强制停止其任意 Java 代码。
+
+本机实际验证及未验证的 Windows/Linux 边界见 [SDK-02 验收记录](agt-maintenance-progress.md#sdk-02)。

@@ -1,13 +1,16 @@
 package io.github.sandboxdemo.api;
 
 import java.util.Collections;
+import java.util.EnumMap;
 import java.util.LinkedHashSet;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
 /** Stable description of the policies an SDK backend can enforce. */
 public final class SandboxCapabilities {
 
+    private final Map<SandboxCapability, SandboxCapabilitySupport> dimensions;
     private final SandboxPlatform platform;
     private final String backendName;
     private final Set<ReadPolicy> supportedReadPolicies;
@@ -57,6 +60,41 @@ public final class SandboxCapabilities {
             Set<DeletionPolicy> supportedDeletionPolicies,
             boolean installationRequired,
             SandboxEnforcement enforcement) {
+        this(
+                platform,
+                backendName,
+                supportedReadPolicies,
+                supportedNetworkPolicies,
+                supportedDeletionPolicies,
+                installationRequired,
+                enforcement,
+                Collections.emptyMap());
+    }
+
+    /** 新增维度描述；旧构造器及未指定维度均保守返回 UNKNOWN。 */
+    public SandboxCapabilities(
+            SandboxPlatform platform,
+            String backendName,
+            Set<ReadPolicy> supportedReadPolicies,
+            Set<NetworkPolicy> supportedNetworkPolicies,
+            Set<DeletionPolicy> supportedDeletionPolicies,
+            boolean installationRequired,
+            SandboxEnforcement enforcement,
+            Map<SandboxCapability, SandboxCapabilitySupport> dimensions) {
+        EnumMap<SandboxCapability, SandboxCapabilitySupport> copy =
+                new EnumMap<>(SandboxCapability.class);
+        for (SandboxCapability capability : SandboxCapability.values()) {
+            copy.put(
+                    capability,
+                    new SandboxCapabilitySupport(SandboxGuarantee.UNKNOWN, "unspecified"));
+        }
+        Objects.requireNonNull(dimensions, "dimensions")
+                .forEach(
+                        (key, value) ->
+                                copy.put(
+                                        Objects.requireNonNull(key, "capability"),
+                                        Objects.requireNonNull(value, "support")));
+        this.dimensions = Collections.unmodifiableMap(copy);
         this.platform = Objects.requireNonNull(platform, "platform");
         if (backendName == null || io.github.sandboxdemo.core.Java8.isBlank(backendName)) {
             throw new IllegalArgumentException("backendName must not be blank");
@@ -70,6 +108,14 @@ public final class SandboxCapabilities {
                 Collections.unmodifiableSet(new LinkedHashSet<>(supportedDeletionPolicies));
         this.installationRequired = installationRequired;
         this.enforcement = Objects.requireNonNull(enforcement, "enforcement");
+    }
+
+    public Map<SandboxCapability, SandboxCapabilitySupport> dimensions() {
+        return dimensions;
+    }
+
+    public SandboxCapabilitySupport support(SandboxCapability capability) {
+        return dimensions.get(Objects.requireNonNull(capability, "capability"));
     }
 
     public SandboxPlatform platform() {
@@ -131,7 +177,8 @@ public final class SandboxCapabilities {
                 && supportedReadPolicies.equals(that.supportedReadPolicies)
                 && supportedNetworkPolicies.equals(that.supportedNetworkPolicies)
                 && supportedDeletionPolicies.equals(that.supportedDeletionPolicies)
-                && enforcement == that.enforcement;
+                && enforcement == that.enforcement
+                && dimensions.equals(that.dimensions);
     }
 
     @Override
@@ -143,7 +190,8 @@ public final class SandboxCapabilities {
                 supportedNetworkPolicies,
                 supportedDeletionPolicies,
                 installationRequired,
-                enforcement);
+                enforcement,
+                dimensions);
     }
 
     @Override
@@ -160,6 +208,8 @@ public final class SandboxCapabilities {
                 + supportedDeletionPolicies
                 + ", installationRequired="
                 + installationRequired
+                + ", dimensions="
+                + dimensions
                 + ", enforcement="
                 + enforcement
                 + "]";

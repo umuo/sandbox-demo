@@ -220,3 +220,19 @@ Seatbelt policy 由 fork/exec 后代继承，因此子进程不能通过简单�
 - [Apple App Sandbox](https://developer.apple.com/documentation/security/app-sandbox)
 - [Codex permissions enforcement](https://learn.chatgpt.com/docs/permissions#how-enforcement-works)
 - [Codex Seatbelt base policy](https://github.com/openai/codex/blob/main/codex-rs/core/src/seatbelt_base_policy.sbpl)
+
+## 严格读取运行时修复（2026-10-14）
+
+macOS 15.5 arm64 的严格 profile 曾使 shell 在 dyld ignition 初始化时 exit 134。合成探针拒绝日志显示根目录本身的 `file-read-data` 被拒绝；修复只允许 `/` 的 DIRECTORY vnode，未允许其子路径。此权限可能暴露根目录条目名称，不开放未声明文件的正文读取。
+
+JDK 的路径解析还需要已声明根和平台运行时根祖先的元数据。SDK 通过 `-DMETADATA_*` 参数生成精确 `literal` 规则，不向祖先授予 `subpath` 内容权限；标准 `/var`、`/etc`、`/tmp` 别名只开放自身元数据。增加 `/private/var/select/sh` 运行时配置读取和精确 `hw.pagesize_compat` 查询，以支持 shell 选择与 JVM 页大小初始化。
+
+宿主可用 `SandboxClient.validate(request)` 在预算提交前运行相同 profile 的可信探针。外层沙箱拒绝嵌套时仍明确不可用；目标命令启动次数为零。成功不能替代目标工具链的依赖验收。
+
+强制验收在正常宿主终端执行：
+
+```bash
+SANDBOX_MACOS_STRICT_ACCEPTANCE=1 mvn -Dtest=MacOsStrictPolicyIntegrationTest test
+```
+
+该测试类不会把 backend unavailable 转成跳过；普通默认测试运行则跳过显式未启用的原生验收。完整 OS/JDK 证据见 [AGT 维护进度](../agt-maintenance-progress.md)。

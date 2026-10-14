@@ -13,6 +13,11 @@ import org.junit.jupiter.api.Test;
 class WindowsNativeStructureTest {
 
     @Test
+    void jobAccountingStructureMatchesWindowsAbi() {
+        assertEquals(48, new WindowsNative.JOBOBJECT_BASIC_ACCOUNTING_INFORMATION().size());
+    }
+
+    @Test
     void nativeAclStructuresMatchWindowsAbi() {
         int expectedTrusteeSize = Native.POINTER_SIZE == 8 ? 32 : 20;
         int expectedExplicitAccessSize = Native.POINTER_SIZE == 8 ? 48 : 32;

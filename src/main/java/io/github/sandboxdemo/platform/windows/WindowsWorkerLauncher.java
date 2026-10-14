@@ -8,8 +8,10 @@ import com.sun.jna.Native;
 import com.sun.jna.Pointer;
 import com.sun.jna.WString;
 import com.sun.jna.ptr.IntByReference;
+import io.github.sandboxdemo.api.SandboxCleanupState;
 import io.github.sandboxdemo.api.SandboxException;
 import io.github.sandboxdemo.api.SandboxResult;
+import io.github.sandboxdemo.core.ExecutionContext;
 import io.github.sandboxdemo.core.OutputCallbacks;
 import io.github.sandboxdemo.core.ValidatedPolicy;
 import java.io.IOException;
@@ -17,15 +19,13 @@ import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /** Starts the trusted Java worker under a dedicated Windows local account. */
@@ -101,6 +101,17 @@ final class WindowsWorkerLauncher {
         startup.cb = startup.size();
         startup.write();
         WindowsNative.PROCESS_INFORMATION process = new WindowsNative.PROCESS_INFORMATION();
+        ExecutionContext context = ExecutionContext.current();
+        boolean owned = context == null;
+        if (owned) {
+            context = new ExecutionContext(policy.timeout(), Duration.ofSeconds(2));
+            context.beginWorker();
+            context.managedBackend();
+        }
+        final ExecutionContext execution = context;
+        ExecutionContext previous = ExecutionContext.attach(context);
+        ExecutionContext.Lease processLease = context.track(ExecutionContext.Resource.PROCESS);
+        ExecutionContext.Lease hostLease = context.track(ExecutionContext.Resource.HOST);
         Pointer job = createKillOnCloseJob();
         AtomicBoolean streamingComplete = new AtomicBoolean();
         ExecutorService streamReaders =
@@ -112,7 +123,9 @@ final class WindowsWorkerLauncher {
                             return thread;
                         });
         Future<?> stdoutTask =
-                streamReaders.submit(
+                WindowsExecutionSupport.submit(
+                        streamReaders,
+                        execution,
                         () -> {
                             streamFile(
                                     session.stdoutStreamFile(),
@@ -125,7 +138,9 @@ final class WindowsWorkerLauncher {
                             return null;
                         });
         Future<?> stderrTask =
-                streamReaders.submit(
+                WindowsExecutionSupport.submit(
+                        streamReaders,
+                        execution,
                         () -> {
                             streamFile(
                                     session.stderrStreamFile(),
@@ -139,6 +154,7 @@ final class WindowsWorkerLauncher {
                         });
 
         try {
+            context.checkActive();
             boolean created =
                     Advapi32.INSTANCE.CreateProcessWithLogonW(
                             new WString(credential.username()),
@@ -170,6 +186,7 @@ final class WindowsWorkerLauncher {
                 Kernel32.INSTANCE.TerminateJobObject(job, 125);
                 throw win32("AssignProcessToJobObject(worker)", error);
             }
+            context.checkActive();
             if (Kernel32.INSTANCE.ResumeThread(process.hThread) == -1) {
                 int error = Native.getLastError();
                 Kernel32.INSTANCE.TerminateJobObject(job, 125);
@@ -178,18 +195,14 @@ final class WindowsWorkerLauncher {
             close(process.hThread);
             process.hThread = null;
 
-            long waitMillis =
-                    Math.min(Integer.MAX_VALUE, policy.timeout().toMillis() + WORKER_GRACE_MILLIS);
-            int wait = Kernel32.INSTANCE.WaitForSingleObject(process.hProcess, (int) waitMillis);
+            int wait = WindowsExecutionSupport.waitForProcess(process.hProcess, context);
             if (wait == WAIT_TIMEOUT) {
-                Kernel32.INSTANCE.TerminateJobObject(job, 124);
-                throw new SandboxException(
-                        "Windows sandbox worker exceeded its shutdown grace period");
+                throw new io.github.sandboxdemo.api.SandboxException(
+                        io.github.sandboxdemo.api.SandboxErrorCode.TIMEOUT,
+                        io.github.sandboxdemo.api.SandboxPhase.EXECUTION,
+                        "Windows worker reached execution deadline");
             }
-            if (wait != WAIT_OBJECT_0) {
-                throw win32("WaitForSingleObject(worker)");
-            }
-
+            context.beginCleanup();
             IntByReference exitCode = new IntByReference();
             if (!Kernel32.INSTANCE.GetExitCodeProcess(process.hProcess, exitCode)) {
                 throw win32("GetExitCodeProcess(worker)");
@@ -201,18 +214,32 @@ final class WindowsWorkerLauncher {
                                 + " without a result file");
             }
             streamingComplete.set(true);
-            awaitStream(stdoutTask);
-            awaitStream(stderrTask);
+            WindowsExecutionSupport.await(stdoutTask, context);
+            WindowsExecutionSupport.await(stderrTask, context);
             return WindowsWorkerProtocol.readResult(session.resultFile());
         } finally {
             streamingComplete.set(true);
             streamReaders.shutdownNow();
-            if (job != null) {
-                Kernel32.INSTANCE.TerminateJobObject(job, 125);
-            }
+            SandboxCleanupState jobState =
+                    job == null
+                            ? SandboxCleanupState.NOT_REQUIRED
+                            : WindowsExecutionSupport.terminateJob(job, context);
+            SandboxCleanupState rootState =
+                    WindowsExecutionSupport.terminateRoot(process.hProcess, context);
+            processLease.complete(
+                    rootState == SandboxCleanupState.CONFIRMED
+                                    || rootState == SandboxCleanupState.NOT_REQUIRED
+                            ? jobState
+                            : rootState);
             close(process.hThread);
             close(process.hProcess);
             close(job);
+            hostLease.complete(SandboxCleanupState.UNKNOWN);
+            if (owned) {
+                context.finishWorker();
+            }
+            context.endPhaseCleanup();
+            ExecutionContext.restore(previous);
         }
     }
 
@@ -233,17 +260,6 @@ final class WindowsWorkerLauncher {
             }
         } finally {
             callbacks.complete();
-        }
-    }
-
-    private static void awaitStream(Future<?> task) throws SandboxException, InterruptedException {
-        try {
-            task.get(5, TimeUnit.SECONDS);
-        } catch (ExecutionException e) {
-            throw new SandboxException("failed while reading Windows worker output", e.getCause());
-        } catch (TimeoutException e) {
-            task.cancel(true);
-            throw new SandboxException("Windows worker output callback did not complete", e);
         }
     }
 

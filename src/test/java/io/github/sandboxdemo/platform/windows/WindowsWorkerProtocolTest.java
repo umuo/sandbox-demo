@@ -89,7 +89,7 @@ class WindowsWorkerProtocolTest {
                         SandboxException.class,
                         () -> WindowsWorkerProtocol.readRequest(directoryInsteadOfRequest));
 
-        assertTrue(error.getMessage().startsWith("failed to read Windows worker request ("));
-        assertTrue(error.getCause() instanceof java.io.IOException);
+        assertTrue(error.debugMessage().startsWith("failed to read Windows worker request ("));
+        assertTrue(error.debugCause() instanceof java.io.IOException);
     }
 }
