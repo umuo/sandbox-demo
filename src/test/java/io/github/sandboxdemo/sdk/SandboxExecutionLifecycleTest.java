@@ -45,6 +45,7 @@ class SandboxExecutionLifecycleTest {
 
     private SandboxRequest request(Duration timeout) {
         return SandboxRequest.builder(workspace, "/bin/true")
+                .readPolicy(ReadPolicy.DECLARED_ONLY)
                 .network(NetworkPolicy.DENY)
                 .timeout(timeout)
                 .build();

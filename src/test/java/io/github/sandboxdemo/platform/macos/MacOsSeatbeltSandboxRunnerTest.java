@@ -74,16 +74,18 @@ class MacOsSeatbeltSandboxRunnerTest {
         SandboxPolicy policy =
                 SandboxPolicy.builder(workspace)
                         .network(NetworkPolicy.DENY)
-                        .timeout(Duration.ofMillis(100))
+                        .timeout(Duration.ofSeconds(2))
                         .build();
 
         SandboxResult result =
                 executeOrSkip(
                         new MacOsSeatbeltSandboxRunner(),
-                        SandboxRequest.of(policy, CommandSpec.of("/bin/sh", "-c", "sleep 5")));
+                        SandboxRequest.of(
+                                policy, CommandSpec.of("/bin/sh", "-c", "printf ready; sleep 10")));
 
+        assertTrue(result.stdoutUtf8().contains("ready"), "target must start before timeout");
         assertTrue(result.timedOut());
-        assertTrue(result.duration().compareTo(Duration.ofSeconds(3)) < 0);
+        assertTrue(result.duration().compareTo(Duration.ofSeconds(5)) < 0);
     }
 
     private static CommandSpec shellWrite(Path target) {

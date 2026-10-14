@@ -35,7 +35,10 @@ class MacOsSeatbeltProfileTest {
     @Test
     void runtimeDiscoveryUsesExactDirectoryAndAncestorMetadataRules() throws Exception {
         ValidatedPolicy policy =
-                PathPolicyValidator.validate(SandboxPolicy.builder(workspace).build());
+                PathPolicyValidator.validate(
+                        SandboxPolicy.builder(workspace)
+                                .readPolicy(ReadPolicy.DECLARED_ONLY)
+                                .build());
         try {
             MacOsSeatbeltProfile.GeneratedProfile generated = MacOsSeatbeltProfile.generate(policy);
             assertTrue(generated.profile().contains("(literal \"/\") (vnode-type DIRECTORY)"));

@@ -96,3 +96,9 @@ SANDBOX_RUN_PLATFORM_INTEGRATION=1 SANDBOX_RUN_LIFECYCLE_INTEGRATION=1 mvn -Dtes
 本轮新增 `SandboxCancellationExample.java` Java 8 取消消费示例 的源码位于仓库 `examples/sdk-consumer`。包含该示例的六个外部消费源码，在实际 JDK 8 及 JDK 17/21 的 Java 8 编译模式下均编译通过；实际 JDK 8 运行新示例也通过，返回 CANCELLED，并明确输出 macOS processes UNKNOWN、streams/temp/host CONFIRMED，未打印命令参数、输出正文或工作区路径。这是本地新构建 all.jar 的消费证据，不是新版本已发布的声明。
 
 文档站最终 `mkdocs build --strict` 通过。实际 JDK 8 verify 包含打包、格式检查和依赖分析；仍有 Javadoc/制品重叠等既有警告，不声称零警告或 Sonar 扫描通过。本阶段没有提交、推送、发布，也没有操作本机账户或防火墙。
+
+## 跨平台 CI 修复（2026-10-14）
+
+首次推送 `03c97c9` 的 Actions #23：文档与 macOS Intel JDK 17/21 通过，其余 9 个测试任务失败。修复单元测试对宿主默认读取/联网策略的依赖；严格 profile 测试显式选用 DECLARED_ONLY。macOS 原生超时测试扩大启动预算并断言目标实际启动；Windows 普通验收扩大 worker 启动预算，短期限允许在启动阶段返回类型化 TIMEOUT，取消验收延长标记等待并补充诊断。Linux 原生验收选择 Ubuntu 22.04，先独立检查 bubblewrap namespace 可用性；宿主失败不能转换为跳过。
+
+本地 Zulu JDK 8 `mvn verify` 与 Zulu 17 完整 macOS 原生测试通过。远端矩阵结果以修复提交对应 Actions 为准；尚未确认通过时不视为跨平台验收完成。

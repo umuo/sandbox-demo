@@ -44,6 +44,8 @@ class SandboxPolicyValidationTest {
                                 client(legacy)
                                         .validate(
                                                 SandboxRequest.builder(workspace, "/bin/true")
+                                                        .readPolicy(ReadPolicy.DECLARED_ONLY)
+                                                        .network(NetworkPolicy.DENY)
                                                         .build()));
         assertEquals(SandboxErrorCode.POLICY_UNSUPPORTED, error.code());
         assertEquals(SandboxPhase.PROBE, error.phase());
@@ -73,13 +75,19 @@ class SandboxPolicyValidationTest {
                         () ->
                                 client.validate(
                                         SandboxRequest.builder(workspace, "/bin/true")
+                                                .readPolicy(ReadPolicy.DECLARED_ONLY)
+                                                .network(NetworkPolicy.DENY)
                                                 .network(NetworkPolicy.ALLOW)
                                                 .build()));
         assertEquals(SandboxErrorCode.POLICY_UNSUPPORTED, error.code());
         assertEquals(SandboxPhase.ADMISSION, error.phase());
         assertEquals(0, probes.get());
         client.validate(
-                SandboxRequest.builder(workspace, "/bin/true").network(NetworkPolicy.DENY).build());
+                SandboxRequest.builder(workspace, "/bin/true")
+                        .readPolicy(ReadPolicy.DECLARED_ONLY)
+                        .network(NetworkPolicy.DENY)
+                        .network(NetworkPolicy.DENY)
+                        .build());
         assertEquals(1, probes.get());
     }
 }

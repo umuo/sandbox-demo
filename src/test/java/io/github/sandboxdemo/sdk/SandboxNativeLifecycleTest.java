@@ -43,12 +43,25 @@ class SandboxNativeLifecycleTest {
                 .build();
     }
 
-    private void awaitMarker(Path marker) throws Exception {
+    private void awaitMarker(Path marker, SandboxExecution execution) throws Exception {
         long end = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
         while (!Files.exists(marker) && end - System.nanoTime() > 0) {
             Thread.sleep(10);
         }
-        assertTrue(Files.exists(marker), "synthetic target did not start");
+        assertTrue(
+                Files.exists(marker),
+                () -> "synthetic target did not start: " + diagnostic(execution));
+    }
+
+    private String diagnostic(SandboxExecution execution) {
+        return execution
+                .completion()
+                .map(
+                        value ->
+                                value.error()
+                                        .map(error -> error.debugMessage())
+                                        .orElse(value.toString()))
+                .orElse("worker still running");
     }
 
     private void assertProcessGuarantee(SandboxExecution execution) {
@@ -69,7 +82,7 @@ class SandboxNativeLifecycleTest {
                                             "echo $$ > rootpid; sleep 2 & echo $! > childpid; printf ready > ready; wait",
                                             Duration.ofSeconds(5)),
                                     workers);
-            awaitMarker(workspace.resolve("ready"));
+            awaitMarker(workspace.resolve("ready"), execution);
             long started = System.nanoTime();
             assertTrue(execution.cancel());
             SandboxCompletion completion = execution.await(Duration.ofSeconds(2));
@@ -101,7 +114,10 @@ class SandboxNativeLifecycleTest {
             long started = System.nanoTime();
             SandboxExecution execution = client().start(request, workers);
             SandboxCompletion completion = execution.await(Duration.ofSeconds(2));
-            assertEquals(SandboxTerminationReason.TIMEOUT, completion.reason());
+            assertEquals(
+                    SandboxTerminationReason.TIMEOUT,
+                    completion.reason(),
+                    () -> diagnostic(execution));
             assertTrue(
                     Duration.ofNanos(System.nanoTime() - started).compareTo(Duration.ofSeconds(2))
                             < 0);
@@ -138,7 +154,7 @@ class SandboxNativeLifecycleTest {
                                     })
                             .build();
             SandboxExecution execution = client().start(request, workers);
-            assertTrue(entered.await(2, TimeUnit.SECONDS));
+            assertTrue(entered.await(2, TimeUnit.SECONDS), () -> diagnostic(execution));
             SandboxCompletion completion = execution.await(Duration.ofSeconds(2));
             assertFalse(completion.completeSuccessful());
             assertEquals(SandboxCleanupState.UNKNOWN, completion.cleanup().streams());

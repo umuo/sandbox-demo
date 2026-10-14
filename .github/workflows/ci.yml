@@ -24,7 +24,8 @@ jobs:
       fail-fast: false
       matrix:
         # Temurin 8 is not published for the arm64 architecture behind macos-latest.
-        os: [ubuntu-latest, macos-15-intel, windows-latest]
+        # Use a host with unprivileged user namespaces available to bubblewrap.
+        os: [ubuntu-22.04, macos-15-intel, windows-latest]
         java: ['8', '17', '21']
         include:
           - os: macos-15
@@ -47,6 +48,9 @@ jobs:
       - name: Install bubblewrap
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y bubblewrap
+      - name: Verify Linux namespace availability
+        if: runner.os == 'Linux'
+        run: bwrap --unshare-user --unshare-pid --ro-bind / / --proc /proc --dev /dev -- /bin/true
       - name: Test Linux and macOS
         if: runner.os != 'Windows'
         run: mvn --batch-mode --no-transfer-progress install

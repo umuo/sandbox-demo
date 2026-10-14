@@ -47,7 +47,7 @@ class WindowsLifecycleIntegrationTest {
                         "cmd.exe");
         // cmd does not consume stdin; ping is a bounded descendant holding inherited output pipes.
         return SandboxRequest.builder(workspace, cmd.toString())
-                .arguments("/d", "/s", "/c", "echo ready>ready & ping -n 3 127.0.0.1 >nul")
+                .arguments("/d", "/s", "/c", "echo ready>ready & ping -n 31 127.0.0.1 >nul")
                 .readPolicy(ReadPolicy.HOST)
                 .network(NetworkPolicy.ALLOW)
                 .timeout(timeout)
@@ -61,12 +61,26 @@ class WindowsLifecycleIntegrationTest {
         ThreadPoolExecutor workers = pool();
         try {
             SandboxExecution execution =
-                    client().start(request(Duration.ofSeconds(20), new byte[1024 * 1024]), workers);
-            long end = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+                    client().start(request(Duration.ofSeconds(60), new byte[1024 * 1024]), workers);
+            long end = System.nanoTime() + TimeUnit.SECONDS.toNanos(40);
             while (!Files.exists(workspace.resolve("ready")) && end - System.nanoTime() > 0) {
                 Thread.sleep(20);
             }
-            assertTrue(Files.exists(workspace.resolve("ready")), "synthetic command did not start");
+            assertTrue(
+                    Files.exists(workspace.resolve("ready")),
+                    () ->
+                            "synthetic command did not start: "
+                                    + execution
+                                            .completion()
+                                            .map(
+                                                    value ->
+                                                            value.error()
+                                                                    .map(
+                                                                            error ->
+                                                                                    error
+                                                                                            .debugMessage())
+                                                                    .orElse(value.toString()))
+                                            .orElse("worker still preparing"));
             assertTrue(execution.cancel());
             assertEquals(
                     SandboxTerminationReason.CANCELLED,

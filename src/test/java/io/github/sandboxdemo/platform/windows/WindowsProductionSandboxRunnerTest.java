@@ -1,5 +1,6 @@
 package io.github.sandboxdemo.platform.windows;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -39,7 +40,7 @@ class WindowsProductionSandboxRunnerTest {
                                         .arguments("/d", "/s", "/c", "echo dedicated-worker-stream")
                                         .network(NetworkPolicy.DENY)
                                         .readPolicy(ReadPolicy.HOST)
-                                        .timeout(Duration.ofSeconds(5))
+                                        .timeout(Duration.ofSeconds(30))
                                         .outputCharsetAuto()
                                         .stdoutTextConsumer(
                                                 text ->
@@ -61,7 +62,7 @@ class WindowsProductionSandboxRunnerTest {
                         .protect(protectedDirectory)
                         .network(NetworkPolicy.DENY)
                         .readPolicy(ReadPolicy.HOST)
-                        .timeout(Duration.ofSeconds(5))
+                        .timeout(Duration.ofSeconds(30))
                         .build();
         WindowsProductionSandboxRunner runner = new WindowsProductionSandboxRunner();
 
@@ -125,9 +126,15 @@ class WindowsProductionSandboxRunnerTest {
                         .readPolicy(ReadPolicy.HOST)
                         .timeout(Duration.ofMillis(200))
                         .build();
-        SandboxResult timeoutResult =
-                runner.execute(SandboxRequest.of(timeoutPolicy, cmd("ping -n 30 127.0.0.1 >NUL")));
-        assertTrue(timeoutResult.timedOut());
+        // The deadline also covers trusted worker startup, so expiry may precede the target.
+        try {
+            SandboxResult timeoutResult =
+                    runner.execute(
+                            SandboxRequest.of(timeoutPolicy, cmd("ping -n 30 127.0.0.1 >NUL")));
+            assertTrue(timeoutResult.timedOut());
+        } catch (io.github.sandboxdemo.api.SandboxException deadline) {
+            assertEquals(io.github.sandboxdemo.api.SandboxErrorCode.TIMEOUT, deadline.code());
+        }
     }
 
     @Test
@@ -143,7 +150,7 @@ class WindowsProductionSandboxRunnerTest {
                 SandboxPolicy.builder(workspace)
                         .network(NetworkPolicy.ALLOW)
                         .readPolicy(ReadPolicy.HOST)
-                        .timeout(Duration.ofSeconds(8))
+                        .timeout(Duration.ofSeconds(30))
                         .build();
         SandboxResult online = runner.execute(SandboxRequest.of(onlinePolicy, powershell(probe)));
         Assumptions.assumeTrue(
@@ -154,7 +161,7 @@ class WindowsProductionSandboxRunnerTest {
                 SandboxPolicy.builder(workspace)
                         .network(NetworkPolicy.DENY)
                         .readPolicy(ReadPolicy.HOST)
-                        .timeout(Duration.ofSeconds(8))
+                        .timeout(Duration.ofSeconds(30))
                         .build();
         SandboxResult offline = runner.execute(SandboxRequest.of(offlinePolicy, powershell(probe)));
         assertFalse(offline.successful(), "offline sandbox unexpectedly reached the network");
@@ -180,7 +187,7 @@ class WindowsProductionSandboxRunnerTest {
                         .writableRoot(writableTests)
                         .readPolicy(ReadPolicy.HOST)
                         .network(NetworkPolicy.ALLOW)
-                        .timeout(Duration.ofSeconds(5))
+                        .timeout(Duration.ofSeconds(30))
                         .build();
         WindowsProductionSandboxRunner runner = new WindowsProductionSandboxRunner();
 
