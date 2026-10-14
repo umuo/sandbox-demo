@@ -9,6 +9,14 @@ import java.util.concurrent.*;
 
 /** Windows 原生等待使用短轮询；只有 Job 活跃进程数为零才能确认树回收。 */
 final class WindowsExecutionSupport {
+    private static final java.util.logging.Logger LOG =
+            java.util.logging.Logger.getLogger(WindowsExecutionSupport.class.getName());
+
+    private static SandboxCleanupState unknown(String operation) {
+        LOG.fine(operation + " failed, Win32=" + com.sun.jna.Native.getLastError());
+        return SandboxCleanupState.UNKNOWN;
+    }
+
     private WindowsExecutionSupport() {}
 
     static int waitForProcess(Pointer process, ExecutionContext context) throws SandboxException {
@@ -56,7 +64,7 @@ final class WindowsExecutionSupport {
                         new WindowsNative.JOBOBJECT_BASIC_ACCOUNTING_INFORMATION();
                 if (!Kernel32.INSTANCE.QueryInformationJobObject(
                         job, 1, information.getPointer(), information.size(), null)) {
-                    return SandboxCleanupState.UNKNOWN;
+                    return unknown("QueryInformationJobObject");
                 }
                 information.read();
                 if (information.ActiveProcesses == 0) {
@@ -87,7 +95,7 @@ final class WindowsExecutionSupport {
             return SandboxCleanupState.CONFIRMED;
         }
         if (!Kernel32.INSTANCE.TerminateProcess(root, 125)) {
-            return SandboxCleanupState.UNKNOWN;
+            return unknown("TerminateProcess");
         }
         while (context.cleanupRemainingNanos() > 0) {
             int wait =
@@ -104,7 +112,7 @@ final class WindowsExecutionSupport {
                 return SandboxCleanupState.CONFIRMED;
             }
             if (wait != 258) {
-                return SandboxCleanupState.UNKNOWN;
+                return unknown("WaitForSingleObject(root), status=" + wait);
             }
         }
         return SandboxCleanupState.FAILED;

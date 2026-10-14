@@ -58,6 +58,13 @@ class WindowsLifecycleIntegrationTest {
     @Test
     void runningCancellationConfirmsOuterJobEmptyButDoesNotInventAclCleanupEvidence()
             throws Exception {
+        java.util.logging.Logger logger =
+                java.util.logging.Logger.getLogger(WindowsExecutionSupport.class.getName());
+        java.util.logging.Level oldLevel = logger.getLevel();
+        java.util.logging.ConsoleHandler diagnostics = new java.util.logging.ConsoleHandler();
+        diagnostics.setLevel(java.util.logging.Level.FINE);
+        logger.addHandler(diagnostics);
+        logger.setLevel(java.util.logging.Level.FINE);
         ThreadPoolExecutor workers = pool();
         try {
             SandboxExecution execution =
@@ -92,6 +99,9 @@ class WindowsLifecycleIntegrationTest {
             assertEquals(SandboxCleanupState.UNKNOWN, execution.cleanup().hostResources());
         } finally {
             workers.shutdownNow();
+            logger.removeHandler(diagnostics);
+            diagnostics.close();
+            logger.setLevel(oldLevel);
         }
     }
 
