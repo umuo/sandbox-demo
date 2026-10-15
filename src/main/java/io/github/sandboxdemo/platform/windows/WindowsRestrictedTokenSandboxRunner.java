@@ -8,7 +8,6 @@ import io.github.sandboxdemo.api.SandboxRequest;
 import io.github.sandboxdemo.api.SandboxResult;
 import io.github.sandboxdemo.api.SandboxRunner;
 import io.github.sandboxdemo.core.EnvironmentPolicy;
-import io.github.sandboxdemo.core.ExecutableResolver;
 import io.github.sandboxdemo.core.PathPolicyValidator;
 import io.github.sandboxdemo.core.ValidatedPolicy;
 import java.io.IOException;
@@ -22,6 +21,11 @@ import java.util.Map;
  * kill-on-close Job Object.
  */
 public final class WindowsRestrictedTokenSandboxRunner implements SandboxRunner {
+
+    @Override
+    public boolean supportsEnvironment(io.github.sandboxdemo.api.SandboxRequest request) {
+        return true;
+    }
 
     @Override
     public boolean supportsOutputPolicy(io.github.sandboxdemo.api.SandboxPolicy policy) {
@@ -121,7 +125,7 @@ public final class WindowsRestrictedTokenSandboxRunner implements SandboxRunner 
                 context == null
                         ? null
                         : context.track(io.github.sandboxdemo.core.ExecutionContext.Resource.HOST);
-        ValidatedPolicy policy = PathPolicyValidator.validate(request.policy());
+        ValidatedPolicy policy = PathPolicyValidator.validate(request);
         try {
             if (policy.readPolicy() != ReadPolicy.HOST) {
                 throw new SandboxBackendUnavailableException(
@@ -140,12 +144,7 @@ public final class WindowsRestrictedTokenSandboxRunner implements SandboxRunner 
             }
 
             Map<String, String> environment = EnvironmentPolicy.build(request, policy);
-            Path executable =
-                    ExecutableResolver.resolve(
-                            request.command().executable(),
-                            policy.workingDirectory(),
-                            environment,
-                            policy.allowPathSearch());
+            Path executable = EnvironmentPolicy.resolveExecutable(request, policy, environment);
             Path target = executable;
             if (probe) {
                 executable =

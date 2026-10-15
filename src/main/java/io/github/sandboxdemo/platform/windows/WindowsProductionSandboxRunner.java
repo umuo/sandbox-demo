@@ -8,7 +8,6 @@ import io.github.sandboxdemo.api.SandboxRequest;
 import io.github.sandboxdemo.api.SandboxResult;
 import io.github.sandboxdemo.api.SandboxRunner;
 import io.github.sandboxdemo.core.EnvironmentPolicy;
-import io.github.sandboxdemo.core.ExecutableResolver;
 import io.github.sandboxdemo.core.PathPolicyValidator;
 import io.github.sandboxdemo.core.ValidatedPolicy;
 import java.nio.file.Path;
@@ -28,6 +27,11 @@ public final class WindowsProductionSandboxRunner implements SandboxRunner {
 
     public WindowsProductionSandboxRunner(Path home) {
         this.home = home.toAbsolutePath().normalize();
+    }
+
+    @Override
+    public boolean supportsEnvironment(io.github.sandboxdemo.api.SandboxRequest request) {
+        return true;
     }
 
     @Override
@@ -84,7 +88,7 @@ public final class WindowsProductionSandboxRunner implements SandboxRunner {
                 context == null
                         ? null
                         : context.track(io.github.sandboxdemo.core.ExecutionContext.Resource.HOST);
-        ValidatedPolicy policy = PathPolicyValidator.validate(request.policy());
+        ValidatedPolicy policy = PathPolicyValidator.validate(request);
         try {
             if (policy.readPolicy() != ReadPolicy.HOST) {
                 throw new SandboxBackendUnavailableException(
@@ -105,12 +109,7 @@ public final class WindowsProductionSandboxRunner implements SandboxRunner {
                 WindowsFirewall.verify(credential.sid());
             }
             Map<String, String> environment = EnvironmentPolicy.build(request, policy);
-            Path executable =
-                    ExecutableResolver.resolve(
-                            request.command().executable(),
-                            policy.workingDirectory(),
-                            environment,
-                            policy.allowPathSearch());
+            Path executable = EnvironmentPolicy.resolveExecutable(request, policy, environment);
             Path target = executable;
             if (probe) {
                 executable =

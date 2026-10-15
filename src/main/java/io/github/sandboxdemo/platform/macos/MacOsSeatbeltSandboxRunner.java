@@ -8,7 +8,6 @@ import io.github.sandboxdemo.api.SandboxRequest;
 import io.github.sandboxdemo.api.SandboxResult;
 import io.github.sandboxdemo.api.SandboxRunner;
 import io.github.sandboxdemo.core.EnvironmentPolicy;
-import io.github.sandboxdemo.core.ExecutableResolver;
 import io.github.sandboxdemo.core.PathPolicyValidator;
 import io.github.sandboxdemo.core.ProcessExecutor;
 import io.github.sandboxdemo.core.ValidatedPolicy;
@@ -25,6 +24,11 @@ import java.util.concurrent.TimeUnit;
 public final class MacOsSeatbeltSandboxRunner implements SandboxRunner {
 
     private static final Path SANDBOX_EXEC = java.nio.file.Paths.get("/usr/bin/sandbox-exec");
+
+    @Override
+    public boolean supportsEnvironment(io.github.sandboxdemo.api.SandboxRequest request) {
+        return true;
+    }
 
     @Override
     public boolean supportsOutputPolicy(io.github.sandboxdemo.api.SandboxPolicy policy) {
@@ -113,15 +117,10 @@ public final class MacOsSeatbeltSandboxRunner implements SandboxRunner {
             context.managedBackend();
             context.checkActive();
         }
-        ValidatedPolicy policy = PathPolicyValidator.validate(request.policy());
+        ValidatedPolicy policy = PathPolicyValidator.validate(request);
         try {
             Map<String, String> environment = EnvironmentPolicy.build(request, policy);
-            Path executable =
-                    ExecutableResolver.resolve(
-                            request.command().executable(),
-                            policy.workingDirectory(),
-                            environment,
-                            policy.allowPathSearch());
+            Path executable = EnvironmentPolicy.resolveExecutable(request, policy, environment);
             MacOsSeatbeltProfile.validateExecutableReadAccess(executable, policy);
             probeGeneratedProfile(
                     MacOsSeatbeltProfile.generate(policy), policy, EnvironmentPolicy.probe(policy));
@@ -147,15 +146,10 @@ public final class MacOsSeatbeltSandboxRunner implements SandboxRunner {
             context.managedBackend();
             context.checkActive();
         }
-        ValidatedPolicy policy = PathPolicyValidator.validate(request.policy());
+        ValidatedPolicy policy = PathPolicyValidator.validate(request);
         try {
             Map<String, String> environment = EnvironmentPolicy.build(request, policy);
-            Path executable =
-                    ExecutableResolver.resolve(
-                            request.command().executable(),
-                            policy.workingDirectory(),
-                            environment,
-                            policy.allowPathSearch());
+            Path executable = EnvironmentPolicy.resolveExecutable(request, policy, environment);
             MacOsSeatbeltProfile.validateExecutableReadAccess(executable, policy);
             MacOsSeatbeltProfile.GeneratedProfile generated = MacOsSeatbeltProfile.generate(policy);
 

@@ -298,7 +298,7 @@ String version = check.backendInfo().backendVersion().orElse("UNKNOWN");
 
 `capabilities()` 描述机制；`status()` 检查部署环境；`readiness(request)` 检查本次路径和策略；`cleanup()` 独立描述探针资源回收。`ready()` 不要求所有资源都已确认：macOS processes 和 Windows hostResources 仍可能 UNKNOWN。宿主要求全面回收时必须另行拒绝 UNKNOWN/FAILED。
 
-Linux 探针实际进入 bubblewrap namespace、mount 和 seccomp 策略；macOS 使用请求的 Seatbelt profile；Windows 使用同一 token/Job 或专用账户 worker/ACL 准备路径。Windows 默认仍拒绝严格读取和网络拒绝，不会自动改成 HOST/ALLOW。探针仅运行 SDK 固定可信程序，不执行请求 argv/stdin，不调用监听器。探针使用独立受控环境，不接受调用方 PATH、shell 启动脚本或加载器注入变量；这不等于已经实现 SDK-06 的目标进程严格环境。
+Linux 探针实际进入 bubblewrap namespace、mount 和 seccomp 策略；macOS 使用请求的 Seatbelt profile；Windows 使用同一 token/Job 或专用账户 worker/ACL 准备路径。Windows 默认仍拒绝严格读取和网络拒绝，不会自动改成 HOST/ALLOW。探针仅运行 SDK 固定可信程序，不执行请求 argv/stdin，不调用监听器。探针使用独立受控环境，不接受调用方 PATH、shell 启动脚本或加载器注入变量；这只约束探针；目标进程的严格环境需显式使用 SDK-06 配置。
 
 探针会准备临时目录；Windows 可能暂时调整 ACL、创建会话资源。它验证可执行路径的可见性，但不证明目标的全部动态依赖可用，也不消除预检与执行之间的竞态。执行仍重新实施策略；预检结果不能作为可缓存授权令牌。程序必须位于平台运行时根或宿主声明的可读根，JDK 安装目录需显式声明。
 
@@ -379,3 +379,38 @@ Linux 使用 PID namespace 边界；Windows 只有在原生 `QueryInformationJob
 原有自定义 runner 的 `execute(request)` 继续可用。新增默认 `execute(request, control)` 在进入前检查信号；后端可覆盖该方法并轮询 `SandboxExecutionControl`，通过 `reportCleanup` 明确上报真实回收证据。SDK 仍独立判断自己的工作线程是否结束；上报值不能覆盖未完成的 SDK 资源账本。旧后端即使返回成功，也不自动获得回收证据。任何不响应停止的自定义后端，在 deadline 后得到有界 UNKNOWN 交付，不能强制停止其任意 Java 代码。
 
 本机实际验证及未验证的 Windows/Linux 边界见 [SDK-02 验收记录](agt-maintenance-progress.md#sdk-02)。
+
+## SDK-06：严格目标环境与工作区供应
+
+旧构造器和默认 builder 继续使用 legacy 环境。宿主显式选择严格 preset：
+
+```java
+SandboxWorkspace workspace = SandboxWorkspace.create(trustedPrivateParent);
+SandboxEnvironment environment = SandboxEnvironment.strict(trustedToolBin)
+        .allowVariable("APP_MODE");
+SandboxRequest request = workspace.request(absoluteTrustedExecutable)
+        .executionEnvironment(environment)
+        .environment("APP_MODE", "synthetic")
+        .build();
+SandboxPolicyReadiness check = client.readiness(request);
+// 准入通过后执行；宿主保留并绑定原始 request。
+// client.execute(request);
+// 确认执行及后台资源不再使用工作区后：
+SandboxCleanupState removed = workspace.cleanup();
+```
+
+`SandboxEnvironment.strict(Path...)` 要求 1–64 个绝对工具目录，组成完整 PATH，不追加宿主 PATH、空项或当前目录。主程序的实际路径必须位于这些目录内，包括绝对路径和解析后的符号链接；裸名称仍需 `.allowPathSearch(true)`。目录与工作区、任一目标可写根相交时拒绝。严格读取模式自动将工具目录加入有效只读根；HOST 模式已有读取可见性，不额外修改系统工具目录 ACL。宿主必须供应固定、对执行身份只读的工具链，并防止其他进程替换其内容。
+
+严格环境不继承宿主 locale、代理、凭据或语言运行时变量，仅生成固定 PATH、私有目录变量，以及 Windows 必需的 SystemRoot/WINDIR/ComSpec 和固定 `.EXE` PATHEXT。Windows 系统位置来自可信宿主配置。显式请求变量必须先由宿主 `allowVariable(name)` 允许；名称按大小写不敏感方式准入，不会自动读取同名宿主值。未允许变量在任何探针/目标启动前返回 `POLICY_INVALID / ADMISSION`。
+
+PATH、目录变量、ENV/BASH_ENV、LD_*、DYLD_*、Java/JDK 选项、Python/Node/Ruby/Perl/.NET 等已知运行时控制入口不能加入允许列表。新增应用变量仍需宿主审查语义，这不是涵盖所有语言和第三方工具的通用注入检测器。严格模式不负责禁止脚本参数、程序内部 shell 搜索、Windows 的当前目录 DLL/子程序搜索或语言默认模块搜索；固定工具的安全参数和工具链供应仍由宿主负责。
+
+每次执行与预检获得独立随机 temp，严格目标的 HOME/USERPROFILE、缓存位于该 temp 内；默认关闭后不保留 HOME 数据。调用方不能覆盖这些目录变量。`privateTempParent(path)` 只指定宿主父目录，不复用单个 temp。四个内建后端支持此配置；旧自定义 runner 默认拒绝严格环境或自定义 temp，必须显式实现 `supportsEnvironment`，不能静默忽略。
+
+`SandboxWorkspace.create(parent)` 在已存在的可信父目录下创建独立工作区与 temp 父目录；`request(executable)` 自动使用它们，模型无需提供可读写根。POSIX 以原子 0700 创建私有目录；Windows 在交付前固定并检查当前宿主用户 DACL，创建和设置 ACL 之间的安全性依赖父目录已由宿主保护。后端进入前仍可按原有机制授予专用账户/能力 SID 必需权限；Windows ACL 回滚完整性仍为 UNKNOWN。
+
+`workspace.cleanup()`/`cleanupState()` 独立报告 CONFIRMED/FAILED/UNKNOWN，`close()` 尝试清理，调用后须检查状态。初始 UNKNOWN 表示尚未清理；删除失败可见并可重试。它不会自动取消任务或等待后台资源，不能在执行仍使用目录时调用。默认字符串只含状态；路径需显式 getter。temp 回收继续通过执行句柄/预检的 `cleanup().temporaryFiles()` 观察，工作区由宿主独立管理。
+
+删除不跟随符号链接，并检查工作区根的文件身份；无法确认根身份时返回 UNKNOWN。此接口不复制输入、不清洗硬链接、不提供快照，也不能消除父目录被外部重命名的竞态。宿主负责父目录可信性、输入供应与链接审查，不应把已有任意工程直接视为安全工作区。异步任务需结合 SDK-02 的独立回收证据；macOS processes UNKNOWN 和 Windows hostResources UNKNOWN 仍保留。
+
+Java 8 消费示例：`examples/sdk-consumer/src/main/java/example/SandboxStrictEnvironmentExample.java`。传入一个由宿主保护的空父目录；Windows 默认后端仍要求非管理员宿主，专用账户部署须使用显式后端配置。

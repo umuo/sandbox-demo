@@ -14,19 +14,38 @@ import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 
 /** Resolves policy paths immediately before entering an OS security boundary. */
 public final class PathPolicyValidator {
 
     private PathPolicyValidator() {}
 
+    public static ValidatedPolicy validate(io.github.sandboxdemo.api.SandboxRequest request)
+            throws SandboxException {
+        EnvironmentPolicy.validate(request);
+        return validate(request.policy(), request);
+    }
+
     public static ValidatedPolicy validate(SandboxPolicy policy) throws SandboxException {
+        return validate(policy, null);
+    }
+
+    private static ValidatedPolicy validate(
+            SandboxPolicy policy, io.github.sandboxdemo.api.SandboxRequest request)
+            throws SandboxException {
         Path temp = null;
         try {
             Path cwd = requireDirectory(policy.workingDirectory(), "working directory");
             List<Path> readable = realPaths(policy.readableRoots(), true, "readable root");
             List<Path> writable = realPaths(policy.writableRoots(), true, "writable root");
+            if (request != null && request.executionEnvironment().isStrict()) {
+                for (Path tool : EnvironmentPolicy.toolchains(request, writable)) {
+                    if (policy.readPolicy() == io.github.sandboxdemo.api.ReadPolicy.DECLARED_ONLY
+                            && !readable.contains(tool)) {
+                        readable.add(tool);
+                    }
+                }
+            }
             List<Path> protectedPaths = realPaths(policy.protectedPaths(), false, "protected path");
             rejectSymbolicLinkComponents(cwd, "resolved working directory");
             for (Path path : writable) {
@@ -58,7 +77,13 @@ public final class PathPolicyValidator {
                 }
             }
 
-            temp = Files.createTempDirectory("agent-sandbox-" + UUID.randomUUID() + '-');
+            Path parent =
+                    request != null && request.privateTempParent().isPresent()
+                            ? requireDirectory(
+                                    request.privateTempParent().get(), "private temp parent")
+                            : java.nio.file.Paths.get(System.getProperty("java.io.tmpdir"))
+                                    .toRealPath();
+            temp = PrivateDirectories.create(parent, "agent-sandbox-");
             if (ExecutionContext.current() != null) {
                 ExecutionContext.current().trackTemporary(temp);
             }
@@ -71,6 +96,18 @@ public final class PathPolicyValidator {
                 ExecutionContext.current().trackTemporary(canonicalTemp);
             }
             temp = canonicalTemp;
+            if (request != null && request.executionEnvironment().isStrict()) {
+                for (Path tool : EnvironmentPolicy.toolchains(request, writable)) {
+                    if (temp.startsWith(tool) || tool.startsWith(temp)) {
+                        throw new SandboxException(
+                                SandboxErrorCode.POLICY_INVALID,
+                                SandboxPhase.PREPARATION,
+                                "private temp overlaps a strict tool directory");
+                    }
+                }
+                Files.createDirectory(temp.resolve("home"));
+                Files.createDirectory(temp.resolve("cache"));
+            }
             final Path effectiveTemp = temp;
             if (protectedPaths.stream().anyMatch(effectiveTemp::startsWith)) {
                 cleanupDirectory(temp);
@@ -99,7 +136,12 @@ public final class PathPolicyValidator {
                     policy.onOutputLimit(),
                     policy.maxCombinedOutputBytes(),
                     policy.outputCallbackMode());
-        } catch (IOException e) {
+        } catch (SandboxException e) {
+            if (temp != null) {
+                cleanupDirectory(temp);
+            }
+            throw e;
+        } catch (IOException | RuntimeException e) {
             if (temp != null) {
                 cleanupDirectory(temp);
             }

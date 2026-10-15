@@ -82,7 +82,8 @@ class SandboxRequestBuilderTest {
                         .build();
 
         String rendered = request.toString();
-        assertTrue(rendered.contains("ACCESS_TOKEN"));
+        assertFalse(rendered.contains("ACCESS_TOKEN"));
+        assertTrue(rendered.contains("environmentEntries=1"));
         assertTrue(rendered.contains("standardInputBytes=21"));
         assertFalse(rendered.contains("secret-environment-value"));
         assertFalse(rendered.contains("secret-standard-input"));

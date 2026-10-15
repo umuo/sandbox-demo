@@ -12,6 +12,12 @@ public interface SandboxRunner {
         return SandboxBackendInfo.current(SandboxPlatform.current(), backendName(), null);
     }
 
+    /** 旧扩展后端不能静默忽略严格环境或自定义临时目录。 */
+    default boolean supportsEnvironment(SandboxRequest request) {
+        return !request.executionEnvironment().isStrict()
+                && !request.privateTempParent().isPresent();
+    }
+
     /** Legacy backends accept legacy output defaults; new options must be explicitly supported. */
     default boolean supportsOutputPolicy(SandboxPolicy policy) {
         return policy.onOutputLimit() == OutputLimitAction.TRUNCATE

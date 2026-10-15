@@ -7,7 +7,6 @@ import io.github.sandboxdemo.api.SandboxRequest;
 import io.github.sandboxdemo.api.SandboxResult;
 import io.github.sandboxdemo.api.SandboxRunner;
 import io.github.sandboxdemo.core.EnvironmentPolicy;
-import io.github.sandboxdemo.core.ExecutableResolver;
 import io.github.sandboxdemo.core.PathPolicyValidator;
 import io.github.sandboxdemo.core.ProcessExecutor;
 import io.github.sandboxdemo.core.ValidatedPolicy;
@@ -49,6 +48,11 @@ public final class LinuxBubblewrapSandboxRunner implements SandboxRunner {
     public io.github.sandboxdemo.api.SandboxBackendInfo backendInfo() {
         return io.github.sandboxdemo.api.SandboxBackendInfo.current(
                 io.github.sandboxdemo.api.SandboxPlatform.LINUX, backendName(), observedVersion);
+    }
+
+    @Override
+    public boolean supportsEnvironment(io.github.sandboxdemo.api.SandboxRequest request) {
+        return true;
     }
 
     @Override
@@ -155,16 +159,11 @@ public final class LinuxBubblewrapSandboxRunner implements SandboxRunner {
             context.managedBackend();
             context.checkActive();
         }
-        ValidatedPolicy policy = PathPolicyValidator.validate(request.policy());
+        ValidatedPolicy policy = PathPolicyValidator.validate(request);
         try {
             Map<String, String> environment = EnvironmentPolicy.build(request, policy);
             Path bwrap = findBubblewrap();
-            Path executable =
-                    ExecutableResolver.resolve(
-                            request.command().executable(),
-                            policy.workingDirectory(),
-                            environment,
-                            policy.allowPathSearch());
+            Path executable = EnvironmentPolicy.resolveExecutable(request, policy, environment);
             if (probe) {
                 final Path target = executable;
                 if (policy.readPolicy() == ReadPolicy.DECLARED_ONLY

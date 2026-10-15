@@ -71,7 +71,7 @@ public final class SandboxClient {
     public SandboxResult execute(SandboxRequest request)
             throws SandboxException, InterruptedException {
         SandboxRequest required = Objects.requireNonNull(request, "request");
-        validateCapabilities(required.policy());
+        validateRequestCapabilities(required);
         ExecutionContext context = ExecutionContext.current();
         boolean owned = context == null;
         if (owned) {
@@ -115,7 +115,7 @@ public final class SandboxClient {
             throw new IllegalArgumentException(
                     "execution pool requires a bounded queue and AbortPolicy");
         }
-        validateCapabilities(required.policy());
+        validateRequestCapabilities(required);
         ExecutionContext context = new ExecutionContext(required.policy().timeout(), cleanupGrace);
         ManagedExecution execution = new ManagedExecution(context);
         execution.submit(() -> execute(required), workers);
@@ -149,7 +149,7 @@ public final class SandboxClient {
                 io.github.sandboxdemo.api.SandboxBackendInfo.current(
                         capabilities.platform(), capabilities.backendName(), null);
         try {
-            validateCapabilities(required.policy());
+            validateRequestCapabilities(required);
             context.checkActive();
             context.opaqueBackend();
             runner.validate(required);
@@ -204,6 +204,27 @@ public final class SandboxClient {
                 cleanup,
                 java.time.Instant.now(),
                 Duration.ofNanos(System.nanoTime() - started));
+    }
+
+    private void validateRequestCapabilities(SandboxRequest request) throws SandboxException {
+        io.github.sandboxdemo.core.EnvironmentPolicy.validate(request);
+        boolean supported;
+        try {
+            supported = runner.supportsEnvironment(request);
+        } catch (RuntimeException | LinkageError failure) {
+            throw new SandboxException(
+                    SandboxErrorCode.BACKEND_UNAVAILABLE,
+                    SandboxPhase.ADMISSION,
+                    "backend environment capability check failed",
+                    failure);
+        }
+        if (!supported) {
+            throw new SandboxBackendUnavailableException(
+                    SandboxErrorCode.POLICY_UNSUPPORTED,
+                    SandboxPhase.ADMISSION,
+                    "backend does not support requested environment or temp policy");
+        }
+        validateCapabilities(request.policy());
     }
 
     private void validateCapabilities(SandboxPolicy policy) throws SandboxException {

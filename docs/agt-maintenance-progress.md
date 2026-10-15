@@ -132,3 +132,19 @@ CI 新增 `target/test-evidence.json` 与 Step Summary，汇总实际执行/失�
 同步预检不能硬中断卡住的宿主准备操作，不是动态依赖完整验证、持久授权或完整回收保证。macOS processes UNKNOWN、Windows hostResources UNKNOWN 边界保留；SDK-06 目标严格环境与 SDK-07 硬资源准入尚未实现。
 
 本阶段八个外部消费示例在实际 JDK 8 和 JDK 17/21 的 Java 8 编译模式下通过；JDK 8 运行 `SandboxReadinessExample` 得到 ready=true，目标 marker 未生成，macOS processes UNKNOWN、其他回收维度 CONFIRMED。严格文档构建通过。
+
+## SDK-06：严格目标环境与工作区供应（2026-10-15）
+
+范围与验收：保留 legacy 默认行为；严格 preset 不继承宿主 PATH/秘密，显式允许应用变量，拒绝已知加载器与语言运行时控制入口。宿主配置固定只读工具目录，主程序解析结果不得越界或落入可写目录。每次执行独立 HOME/cache/temp；工作区供应接口报告清理失败及未知身份。输入供应、硬链接清洗、父目录保护和工具链不可变性由宿主负责；不扩大 Windows 读取隔离或资源硬限制保证。
+
+方案 spike：复核现有 EnvironmentPolicy、ExecutableResolver、PathPolicyValidator 和平台 ACL/worker 路径；参考 [Bazel 沙箱供应](https://github.com/bazelbuild/bazel/blob/master/src/main/java/com/google/devtools/build/lib/sandbox/LinuxSandboxedSpawnRunner.java) 的独立执行根/临时目录职责划分。采用现有后端与 Java 8 NIO，避免引入整个构建框架。Java 8 的 [Files.createTempDirectory](https://docs.oracle.com/javase/8/docs/api/java/nio/file/Files.html) 支持原子设置 POSIX 属性；Windows 使用 NIO DACL 设置并读回检查，要求父目录由宿主提前保护。新增 API 是本 SDK 的环境准入和生命周期约定，不能由第三方通用目录工具代替。
+
+新增 `SandboxEnvironment.strict(...).allowVariable(...)`、`SandboxWorkspace` 和 `privateTempParent`。四个内建后端复用同一环境准入、工具解析与独立目录准备；Windows worker 已传递最终有效环境，无需再次修改协议。旧自定义后端默认拒绝新配置。严格读取会加入工具只读根；HOST 已有可见性，避免为环境配置修改系统目录 ACL，宿主需确保工具对执行身份只读。目标自身的语言导入、shell/DLL/子程序搜索仍需固定工具安全参数。
+
+新增单元验收覆盖变量拒绝、固定 PATH、主程序及链接逃逸拒绝、工具与可写根重叠拒绝、并发 HOME/temp 不共享、工作区独立性、链接删除边界、删除失败重试和根身份替换 UNKNOWN。CI 明确注入一个合成父进程秘密，原生目标检查其没有继承，并检查私有 HOME、temp 删除及合成工具目录的写入拒绝。测试不会尝试写系统工具目录。
+
+本机 macOS 15.5 arm64：Zulu 17.0.11 全部原生测试在最后三项用例加入前为 129 项，0 失败、0 错误、16 跳过；Zulu 21.0.4 最终原生测试 132 项，0 失败、0 错误、16 跳过。实际 JDK 8 专项测试在根身份用例加入前执行 13 项，全部通过无跳过。九个外部消费示例在实际 JDK 8 与 JDK 17/21 的 Java 8 编译模式下通过；JDK 8 运行新示例得到 exitCode=0、workspace cleanup CONFIRMED，未打印环境正文。严格文档构建通过。
+
+SDK-04/05 提交 `fc5e254` 的 [Actions](https://github.com/umuo/sandbox-demo/actions/runs/38661041090) 已确认全部 12 个任务通过；本阶段 Linux/Windows 原生结果需以本阶段提交对应的新 Actions 为准。SDK-07 硬资源准入尚未实现；macOS processes UNKNOWN 和 Windows hostResources UNKNOWN 的独立回收边界继续保留。
+
+最终实际 Zulu JDK 8u282 `mvn verify`：132 项，0 失败、0 错误、31 跳过（默认未启用原生验收）；包含打包、格式及依赖分析。JDK 17 格式检查与严格文档构建通过。

@@ -38,6 +38,8 @@ jobs:
       SANDBOX_RUN_LIFECYCLE_INTEGRATION: '1'
       SANDBOX_RUN_OUTPUT_INTEGRATION: '1'
       SANDBOX_RUN_READINESS_INTEGRATION: '1'
+      SANDBOX_RUN_ENVIRONMENT_INTEGRATION: '1'
+      SANDBOX_SYNTHETIC_PARENT_SECRET: 'synthetic-parent-secret-must-not-inherit'
       # Modern macOS admission failures are failures, never successful skips.
       SANDBOX_MACOS_STRICT_ACCEPTANCE: ${{ startsWith(matrix.os, 'macos-') && matrix.java != '8' && '1' || '0' }}
     steps:

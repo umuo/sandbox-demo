@@ -33,6 +33,8 @@ public final class SandboxRequest {
                                     "USERPROFILE",
                                     "XDG_CACHE_HOME")));
 
+    private final SandboxEnvironment executionEnvironment;
+    private final Path privateTempParent;
     private final SandboxPolicy policy;
     private final CommandSpec command;
     private final Map<String, String> environment;
@@ -81,6 +83,41 @@ public final class SandboxRequest {
             Charset stderrCharset,
             boolean stdoutCharsetAuto,
             boolean stderrCharsetAuto) {
+        this(
+                policy,
+                command,
+                environment,
+                standardInput,
+                stdoutConsumer,
+                stderrConsumer,
+                stdoutTextConsumer,
+                stderrTextConsumer,
+                stdoutCharset,
+                stderrCharset,
+                stdoutCharsetAuto,
+                stderrCharsetAuto,
+                SandboxEnvironment.legacy(),
+                null);
+    }
+
+    private SandboxRequest(
+            SandboxPolicy policy,
+            CommandSpec command,
+            Map<String, String> environment,
+            byte[] standardInput,
+            Consumer<byte[]> stdoutConsumer,
+            Consumer<byte[]> stderrConsumer,
+            Consumer<String> stdoutTextConsumer,
+            Consumer<String> stderrTextConsumer,
+            Charset stdoutCharset,
+            Charset stderrCharset,
+            boolean stdoutCharsetAuto,
+            boolean stderrCharsetAuto,
+            SandboxEnvironment executionEnvironment,
+            Path privateTempParent) {
+        this.executionEnvironment =
+                Objects.requireNonNull(executionEnvironment, "executionEnvironment");
+        this.privateTempParent = privateTempParent;
         this.policy = Objects.requireNonNull(policy, "policy");
         this.command = Objects.requireNonNull(command, "command");
         Map<String, String> copiedEnvironment =
@@ -123,6 +160,15 @@ public final class SandboxRequest {
 
     public static SandboxRequest of(SandboxPolicy policy, CommandSpec command) {
         return new SandboxRequest(policy, command, Collections.emptyMap(), new byte[0], null, null);
+    }
+
+    public SandboxEnvironment executionEnvironment() {
+        return executionEnvironment;
+    }
+
+    /** 每次执行仍创建独立随机目录；此处只指定宿主可信父目录。 */
+    public java.util.Optional<Path> privateTempParent() {
+        return java.util.Optional.ofNullable(privateTempParent);
     }
 
     public SandboxPolicy policy() {
@@ -223,6 +269,8 @@ public final class SandboxRequest {
     /** Fluent builder that combines command, policy and explicit environment configuration. */
     public static final class Builder {
 
+        private SandboxEnvironment executionEnvironment = SandboxEnvironment.legacy();
+        private Path privateTempParent;
         private final SandboxPolicy.Builder policy;
         private final String executable;
         private final List<String> arguments;
@@ -254,6 +302,17 @@ public final class SandboxRequest {
 
         public Builder arguments(List<String> arguments) {
             this.arguments.addAll(Objects.requireNonNull(arguments, "arguments"));
+            return this;
+        }
+
+        public Builder executionEnvironment(SandboxEnvironment configuration) {
+            this.executionEnvironment = Objects.requireNonNull(configuration, "configuration");
+            return this;
+        }
+
+        public Builder privateTempParent(Path parent) {
+            this.privateTempParent =
+                    Objects.requireNonNull(parent, "parent").toAbsolutePath().normalize();
             return this;
         }
 
@@ -476,7 +535,9 @@ public final class SandboxRequest {
                     stdoutCharset,
                     stderrCharset,
                     stdoutCharsetAuto,
-                    stderrCharsetAuto);
+                    stderrCharsetAuto,
+                    executionEnvironment,
+                    privateTempParent);
         }
     }
 
@@ -489,7 +550,9 @@ public final class SandboxRequest {
             return false;
         }
         SandboxRequest that = (SandboxRequest) other;
-        return policy.equals(that.policy)
+        return executionEnvironment.equals(that.executionEnvironment)
+                && Objects.equals(privateTempParent, that.privateTempParent)
+                && policy.equals(that.policy)
                 && command.equals(that.command)
                 && environment.equals(that.environment)
                 && Arrays.equals(standardInput, that.standardInput)
@@ -503,13 +566,17 @@ public final class SandboxRequest {
     public int hashCode() {
         int result =
                 Objects.hash(
+                        executionEnvironment,
+                        privateTempParent,
                         policy,
                         command,
                         environment,
                         stdoutCharset,
                         stderrCharset,
                         stdoutCharsetAuto,
-                        stderrCharsetAuto);
+                        stderrCharsetAuto,
+                        executionEnvironment,
+                        privateTempParent);
         return 31 * result + Arrays.hashCode(standardInput);
     }
 
@@ -519,8 +586,8 @@ public final class SandboxRequest {
                 + policy
                 + ", command="
                 + command
-                + ", environmentKeys="
-                + environment.keySet()
+                + ", environmentEntries="
+                + environment.size()
                 + ", standardInputBytes="
                 + standardInput.length
                 + "]";
