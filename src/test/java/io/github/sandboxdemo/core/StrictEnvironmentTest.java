@@ -16,6 +16,8 @@ class StrictEnvironmentTest {
     private SandboxRequest.Builder request(Path tools) throws Exception {
         Path work = Files.createDirectories(root.resolve("work"));
         return SandboxRequest.builder(work, "synthetic-tool")
+                .readPolicy(ReadPolicy.DECLARED_ONLY)
+                .network(NetworkPolicy.DENY)
                 .allowPathSearch(true)
                 .executionEnvironment(SandboxEnvironment.strict(tools));
     }

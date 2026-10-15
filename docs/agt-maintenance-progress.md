@@ -150,3 +150,5 @@ SDK-04/05 提交 `fc5e254` 的 [Actions](https://github.com/umuo/sandbox-demo/ac
 最终实际 Zulu JDK 8u282 `mvn verify`：132 项，0 失败、0 错误、31 跳过（默认未启用原生验收）；包含打包、格式及依赖分析。JDK 17 格式检查与严格文档构建通过。
 
 补充删除边界审查：工作区与执行 temp 共用不跟随链接的删除器，Windows 显式检测全部 reparse point，在进入 junction 前删除链接本身。新增 Windows junction/外部合成 canary 验收，避免仅依赖 `Files.isSymbolicLink`。根身份被替换时仍返回 UNKNOWN，不删除替代目录。
+
+首次 SDK-06 矩阵 `7acf09b`：Linux/macOS 全通过，Windows 发现工作区 `BasicFileAttributes.fileKey()` 为空，导致实际目录未替换仍返回 UNKNOWN。修复为 Windows 使用原生 FILE_ID_INFO（卷号 + 128 位文件 ID）比较身份，句柄始终关闭；无法取得证据仍拒绝确认。同步修复单元测试依赖 Windows 默认 HOST 的问题，显式声明严格读取策略。未放宽 UNKNOWN 的成功条件。

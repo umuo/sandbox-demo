@@ -3,7 +3,6 @@ package io.github.sandboxdemo.api;
 import io.github.sandboxdemo.core.PrivateDirectories;
 import java.io.IOException;
 import java.nio.file.*;
-import java.nio.file.attribute.BasicFileAttributes;
 import java.util.Objects;
 
 /** 宿主供应的独立工作区，不接收模型根目录配置。宿主保证父目录可信并在后台执行结束后清理。 不跟随链接删除；不提供输入复制、硬链接清洗或抵御不可信父目录重命名的保证。 */
@@ -15,9 +14,7 @@ public final class SandboxWorkspace implements AutoCloseable {
 
     private SandboxWorkspace(Path root) throws IOException {
         this.root = root;
-        this.rootKey =
-                Files.readAttributes(root, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS)
-                        .fileKey();
+        this.rootKey = PrivateDirectories.identity(root);
         this.directory = PrivateDirectories.create(root, "work-");
         this.temporaryParent = PrivateDirectories.create(root, "temp-");
     }
@@ -70,12 +67,7 @@ public final class SandboxWorkspace implements AutoCloseable {
                 cleanup = SandboxCleanupState.CONFIRMED;
             } else if (PrivateDirectories.isLink(root)
                     || rootKey == null
-                    || !rootKey.equals(
-                            Files.readAttributes(
-                                            root,
-                                            BasicFileAttributes.class,
-                                            LinkOption.NOFOLLOW_LINKS)
-                                    .fileKey())) {
+                    || !rootKey.equals(PrivateDirectories.identity(root))) {
                 cleanup = SandboxCleanupState.UNKNOWN;
             } else {
                 cleanup = remove(root) ? SandboxCleanupState.CONFIRMED : SandboxCleanupState.FAILED;
