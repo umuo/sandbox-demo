@@ -55,7 +55,7 @@ class WindowsReadinessIntegrationTest {
         assertFalse(Files.exists(workspace.resolve("caller-target-marker")));
         assertEquals(SandboxCleanupState.CONFIRMED, readiness.cleanup().processes());
         assertEquals(SandboxCleanupState.UNKNOWN, readiness.cleanup().hostResources());
-        assertTrue(readiness.backendInfo().backendVersion().get().contains("worker-protocol 6"));
+        assertTrue(readiness.backendInfo().backendVersion().get().contains("worker-protocol 7"));
         TestEvidence.record(readiness);
     }
 

@@ -191,7 +191,7 @@ SandboxRequest request = SandboxRequest.builder(workspace, "/bin/sh")
 
 这两种回调都是观察接口，不能作为受治理的最终内容交付。受控调用方应不注册回调，等待完整成功及回收确认，再严格解码并治理最终字节；失败结果中的字节仅供显式诊断，不能把截断前缀交付为完整答案。输出额度不是 CPU、内存、PID 或磁盘硬限额。
 
-内建 Linux/macOS 和两个 Windows 后端支持这些选项。旧自定义 runner 通过新增默认方法 `supportsOutputPolicy` 只接受旧默认值；新配置在目标启动前拒绝。扩展后端必须显式声明并实现对应保证。Windows 内部 worker 文件协议升级为 v6，携带输出策略和终止标记；已安装的专用账户 worker 必须用同版本 SDK 重新供应运行时，旧协议明确拒绝，不能静默忽略新配置。消费示例见 `examples/sdk-consumer/src/main/java/example/SandboxOutputLimitExample.java`。
+内建 Linux/macOS 和两个 Windows 后端支持这些选项。旧自定义 runner 通过新增默认方法 `supportsOutputPolicy` 只接受旧默认值；新配置在目标启动前拒绝。扩展后端必须显式声明并实现对应保证。Windows 内部 worker 文件协议升级为 v7，携带输出策略和终止标记；已安装的专用账户 worker 必须用同版本 SDK 重新供应运行时，旧协议明确拒绝，不能静默忽略新配置。消费示例见 `examples/sdk-consumer/src/main/java/example/SandboxOutputLimitExample.java`。
 
 ## 中断、超时与实时流式输出
 
@@ -310,7 +310,7 @@ Linux 探针实际进入 bubblewrap namespace、mount 和 seccomp 策略；macOS
 
 使用 `SandboxException.code()` 和 `phase()` 映射错误，不匹配自由文本。内建路径准备、平台部署、启动、捕获、探针与已确认清理失败均按操作分类；输出超限、超时和取消保留独立停止原因。旧构造器和无法分类的自定义执行错误保守返回 `UNKNOWN`。客户端也封装后端未处理的 RuntimeException/LinkageError，原始异常只在显式调试接口中提供。
 
-Windows worker 协议 v6 按枚举名称传递错误码和阶段，原始诊断限长并只通过调试 API 读取；旧版本或无效枚举明确拒绝。专用账户安装必须重新供应同版本 worker。协议不是不可信客户端的网络接口。
+Windows worker 协议 v7 按枚举名称传递错误码和阶段，原始诊断限长并只通过调试 API 读取；旧版本或无效枚举明确拒绝。专用账户安装必须重新供应同版本 worker。协议不是不可信客户端的网络接口。
 
 旧构造器和方法签名保留，但诊断行为有明确变化：
 
@@ -332,7 +332,7 @@ String mechanism = support.mechanism();
 
 `dimensions()` 是不可变快照。保证级别包括 `KERNEL`、`BEST_EFFORT`、`UNSUPPORTED`、`UNKNOWN`。旧 capability 构造器的所有新增维度默认 UNKNOWN，不能依据平台猜测自定义后端能力。
 
-这些字段描述强制机制，不代表当前请求已经通过预检、进程已经回收或平台已完成原生验收。Windows 默认后端不支持严格读取与网络拒绝；macOS 后代监督和临时目录删除是 best-effort。Windows 内存与进程数限制描述现有 Job 的宿主配置，尚未提供逐请求资源限额准入 API。旧 `FULL` 也不代表 VM 隔离或全部资源都有硬限制。
+这些字段描述强制机制，不代表当前请求已经通过预检、进程已经回收或平台已完成原生验收。Windows 默认后端不支持严格读取与网络拒绝；macOS 后代监督和临时目录删除是 best-effort。Windows 内存与进程数支持 SDK-07 逐请求收紧现有 Job 宿主上限；CPU、磁盘及 VM 隔离要求仍不支持。旧 `FULL` 也不代表 VM 隔离或全部资源都有硬限制。
 
 本轮证据和未完成任务见 [AGT 维护进度](agt-maintenance-progress.md)。
 
@@ -414,3 +414,39 @@ PATH、目录变量、ENV/BASH_ENV、LD_*、DYLD_*、Java/JDK 选项、Python/No
 删除不跟随符号链接或 Windows junction/reparse point，并检查工作区根的文件身份；无法确认根身份时返回 UNKNOWN。此接口不复制输入、不清洗硬链接、不提供快照，也不能消除父目录被外部重命名的竞态。宿主负责父目录可信性、输入供应与链接审查，不应把已有任意工程直接视为安全工作区。异步任务需结合 SDK-02 的独立回收证据；macOS processes UNKNOWN 和 Windows hostResources UNKNOWN 仍保留。
 
 Java 8 消费示例：`examples/sdk-consumer/src/main/java/example/SandboxStrictEnvironmentExample.java`。传入一个由宿主保护的空父目录；Windows 默认后端仍要求非管理员宿主，专用账户部署须使用显式后端配置。
+
+## SDK-07：硬资源与隔离机制准入
+
+```java
+SandboxResourceLimits limits = SandboxResourceLimits.builder()
+        .memoryBytes(96L * 1024 * 1024) // 进程树总提交内存上限，字节
+        .processes(1)                 // 活动进程总数，包含目标根进程
+        .build();
+SandboxRequest request = SandboxRequest.builder(workspace, trustedExecutable)
+        .resourceLimits(limits)
+        .requiredIsolation(SandboxIsolationLevel.OS_PROCESS)
+        .build();
+SandboxPolicyReadiness admission = client.readiness(request);
+// !ready 时按 error().code()/phase() 拒绝；不能删除限额后静默重试。
+```
+
+资源 builder 的 `memoryBytes`、`processes`、`diskBytes` 必须为正数；`cpuTime(Duration)` 要求正的整毫秒、最多 24 小时。未设置的 getter 返回 0，表示本次未请求该维度，不表示后端无限制。旧构造器/默认 builder 继续使用空限制。CPU 字段表示进程树累计 CPU 时间，不等于墙钟 timeout，也不是 CPU 速率百分比；diskBytes 要求覆盖全部可写根及私有 HOME/temp/cache。当前内建后端均拒绝 CPU 和磁盘请求。
+
+| 后端 | 逐请求硬内存/进程数 | CPU/磁盘 | 声明的隔离机制 |
+|---|---|---|---|
+| Linux bubblewrap | 不支持，准入拒绝 | 不支持，准入拒绝 | OS_PROCESS |
+| macOS Seatbelt | 不支持，准入拒绝 | 不支持，准入拒绝 | OS_PROCESS |
+| Windows 默认 token / 专用账户 worker | Job 总提交内存与活动进程数 | 不支持，准入拒绝 | OS_PROCESS |
+| 宿主扩展 runner | 由宿主实际实现并显式声明 | 同左 | 默认 UNKNOWN，需显式声明 |
+
+`UNKNOWN` 作为请求默认值表示不新增隔离机制要求；作为后端值表示未知，不能满足显式要求。OS_PROCESS 指平台进程隔离机制，不保证所有能力维度都为 kernel，也不表示读取、联网或资源维度全部满足。VIRTUAL_MACHINE 要求真正的 VM 后端；四个内建后端都拒绝该要求。VM 声明可以满足 OS_PROCESS 机制要求，但不会自动满足任何资源限制或其他策略。`client.isolationLevel()` 返回后端声明，预检保留本次 `resourceLimits()` / `requiredIsolation()`，宿主仍须绑定原始请求。
+
+新增要求在 `execute`、`start`、`readiness/validate` 的准备与目标启动前检查，不支持返回 `POLICY_UNSUPPORTED / ADMISSION`。不能根据旧 FULL、静态 KERNEL 标签、超时或输出额度猜测硬资源保证。旧自定义 runner 默认只接受空限制和无隔离要求；需显式覆盖 `supportsResourceLimits` 与 `isolationLevel`，为请求的资源维度提供 KERNEL 能力声明，并在真正启动前安装强制边界。UNKNOWN/BEST_EFFORT 不能满足硬限制。能力声明是扩展实现的契约，不是 SDK 对外部部署的认证。
+
+Windows 实际限额取 `min(宿主上限, 请求上限)`，不会用请求放宽宿主配置。宿主默认 2048 MiB 提交内存、64 个活动进程，继续由 `SANDBOX_WINDOWS_MAX_MEMORY_MIB` / `SANDBOX_WINDOWS_MAX_PROCESSES` 配置；请求环境变量不能覆盖宿主限制。专用账户 worker 将请求传递给目标 Job，JVM worker 本身不计入请求的目标 Job。可信预检也使用同一资源配置；过小限额可能使探针或目标无法启动，不能因此移除限额。worker 协议升级 v7，必须重新供应同版本可信运行时。
+
+Windows Job 内存限制是提交内存，不是 RSS/物理内存。超限时系统可拒绝分配；进程数限制可以拒绝或终止新增进程。SDK 尚未订阅 Job 资源通知，因此不会从非零退出或自由文本猜测 RESOURCE_LIMIT；程序可以处理分配失败并正常退出。超时/取消、输出完整性和独立清理状态仍分别检查。受限程序正常退出不等于全部回收，Windows hostResources UNKNOWN 与 macOS processes UNKNOWN 仍保留。
+
+宿主接入 cgroup/worker/VM 时，通过 `SandboxClient.builder().backend(runner, capabilities, statusSupplier)` 提供实际后端：先检查每项请求、建立独立配额与隔离边界，再启动目标，最后按 SDK-02 上报资源清理证据；支持声明必须与实现一致。Linux cgroup 的 memory.max 计费口径与 Windows 提交内存不同，cpu.max 是速率配额，不能直接冒充本接口的提交内存或累计 CPU 时间契约。不提供“宿主已限制”的布尔开关来绕过验证；此版本没有部署 cgroup 控制器或 VM 管理器。
+
+本阶段给固定受信任工具补齐准入与 Windows 两项硬限额；模型生成代码及多租户任意代码仍需要宿主完整威胁模型、读取/联网隔离和缺失的资源维度。Java 8 示例见 `examples/sdk-consumer/src/main/java/example/SandboxResourceAdmissionExample.java`。Windows 原生验收使用仓库 `.github/scripts/resource-probe.cs`，通过系统 Framework64 csc 编译；固定一次 128 MiB VirtualAlloc 或一个子进程，分别做有限额/无限额对照，并检查 Job 与 temp 回收。

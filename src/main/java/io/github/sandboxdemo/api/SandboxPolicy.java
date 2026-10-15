@@ -21,6 +21,8 @@ public final class SandboxPolicy {
     private static final int MAX_PATHS_PER_CATEGORY = 256;
     private static final Duration MAX_TIMEOUT = Duration.ofHours(24);
 
+    private final SandboxResourceLimits resourceLimits;
+    private final SandboxIsolationLevel requiredIsolation;
     private final Path workingDirectory;
     private final List<Path> readableRoots;
     private final List<Path> writableRoots;
@@ -36,6 +38,9 @@ public final class SandboxPolicy {
     private final OutputCallbackMode outputCallbackMode;
 
     private SandboxPolicy(Builder builder) {
+        this.resourceLimits = Objects.requireNonNull(builder.resourceLimits, "resourceLimits");
+        this.requiredIsolation =
+                Objects.requireNonNull(builder.requiredIsolation, "requiredIsolation");
         this.workingDirectory = normalize(builder.workingDirectory);
         this.readableRoots = immutableNormalized(builder.readableRoots);
         this.writableRoots = immutableNormalized(builder.writableRoots);
@@ -84,6 +89,14 @@ public final class SandboxPolicy {
 
     public static Builder builder(Path workingDirectory) {
         return new Builder(workingDirectory);
+    }
+
+    public SandboxResourceLimits resourceLimits() {
+        return resourceLimits;
+    }
+
+    public SandboxIsolationLevel requiredIsolation() {
+        return requiredIsolation;
     }
 
     public Path workingDirectory() {
@@ -167,6 +180,8 @@ public final class SandboxPolicy {
 
     public static final class Builder {
 
+        private SandboxResourceLimits resourceLimits = SandboxResourceLimits.none();
+        private SandboxIsolationLevel requiredIsolation = SandboxIsolationLevel.UNKNOWN;
         private final Path workingDirectory;
         private final List<Path> readableRoots = new ArrayList<>();
         private final List<Path> writableRoots = new ArrayList<>();
@@ -276,6 +291,16 @@ public final class SandboxPolicy {
 
         public Builder outputCallbackMode(OutputCallbackMode mode) {
             this.outputCallbackMode = Objects.requireNonNull(mode, "mode");
+            return this;
+        }
+
+        public Builder resourceLimits(SandboxResourceLimits limits) {
+            this.resourceLimits = Objects.requireNonNull(limits, "limits");
+            return this;
+        }
+
+        public Builder requiredIsolation(SandboxIsolationLevel level) {
+            this.requiredIsolation = Objects.requireNonNull(level, "level");
             return this;
         }
 

@@ -5,6 +5,16 @@ public interface SandboxRunner {
 
     String backendName();
 
+    /** 声明实际机制；未知不得满足调用方的显式隔离要求。 */
+    default SandboxIsolationLevel isolationLevel() {
+        return SandboxIsolationLevel.UNKNOWN;
+    }
+
+    /** 旧 runner 只支持未请求逐项硬限制的调用，不从 coarse FULL 推断支持。 */
+    default boolean supportsResourceLimits(SandboxResourceLimits limits) {
+        return limits.isEmpty();
+    }
+
     /**
      * Old/custom backends report unknown native version unless they explicitly provide evidence.
      */

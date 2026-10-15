@@ -35,12 +35,14 @@ class SandboxReadinessIntegrationTest {
                         .environment("PATH", workspace.toString())
                         .network(NetworkPolicy.DENY)
                         .readPolicy(ReadPolicy.DECLARED_ONLY)
+                        .requiredIsolation(SandboxIsolationLevel.OS_PROCESS)
                         .timeout(Duration.ofSeconds(10))
                         .stdoutConsumer(bytes -> callbacks.incrementAndGet())
                         .stderrConsumer(bytes -> callbacks.incrementAndGet())
                         .build();
         SandboxPolicyReadiness readiness = SandboxClient.create().readiness(request);
         assertTrue(readiness.ready(), readiness.toString());
+        assertEquals(SandboxIsolationLevel.OS_PROCESS, readiness.requiredIsolation());
         assertFalse(Files.exists(workspace.resolve("caller-target-marker")));
         assertFalse(Files.exists(workspace.resolve("caller-input-marker")));
         assertFalse(Files.exists(workspace.resolve("caller-environment-marker")));

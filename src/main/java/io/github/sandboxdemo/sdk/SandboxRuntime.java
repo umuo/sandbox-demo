@@ -143,11 +143,11 @@ public final class SandboxRuntime {
             result.put(
                     SandboxCapability.MEMORY_LIMIT,
                     new SandboxCapabilitySupport(
-                            SandboxGuarantee.KERNEL, "job-object-host-configured"));
+                            SandboxGuarantee.KERNEL, "job-object-per-request-with-host-ceiling"));
             result.put(
                     SandboxCapability.PROCESS_LIMIT,
                     new SandboxCapabilitySupport(
-                            SandboxGuarantee.KERNEL, "job-object-host-configured"));
+                            SandboxGuarantee.KERNEL, "job-object-per-request-with-host-ceiling"));
         }
         return result;
     }

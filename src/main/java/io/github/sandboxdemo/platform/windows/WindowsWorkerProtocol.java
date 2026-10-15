@@ -26,7 +26,7 @@ final class WindowsWorkerProtocol {
 
     private static final int REQUEST_MAGIC = 0x53425851;
     private static final int RESULT_MAGIC = 0x53425852;
-    static final int VERSION = 6;
+    static final int VERSION = 7;
     private static final int MAX_STRING_BYTES = 1024 * 1024;
     private static final int MAX_BINARY_BYTES = 64 * 1024 * 1024;
     private static final int MAX_STANDARD_INPUT_BYTES = 8 * 1024 * 1024;
@@ -59,6 +59,11 @@ final class WindowsWorkerProtocol {
             output.writeInt(request.policy().onOutputLimit().ordinal());
             output.writeInt(request.policy().maxCombinedOutputBytes());
             output.writeInt(request.policy().outputCallbackMode().ordinal());
+            output.writeLong(request.policy().resourceLimits().memoryBytes());
+            output.writeInt(request.policy().resourceLimits().processes());
+            output.writeLong(request.policy().resourceLimits().cpuTimeMillis());
+            output.writeLong(request.policy().resourceLimits().diskBytes());
+            writeString(output, request.policy().requiredIsolation().name());
             writeMap(output, request.environment());
             writeStrings(output, request.capabilitySids());
         } catch (IOException e) {
@@ -130,6 +135,28 @@ final class WindowsWorkerProtocol {
                         io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
                         "invalid limits in Windows worker request");
             }
+            long memory = input.readLong();
+            int processes = input.readInt();
+            long cpu = input.readLong(), disk = input.readLong();
+            io.github.sandboxdemo.api.SandboxIsolationLevel isolation =
+                    io.github.sandboxdemo.api.SandboxIsolationLevel.valueOf(readString(input));
+            if (memory < 0 || processes < 0 || cpu < 0 || disk < 0) {
+                throw new IllegalArgumentException("negative resource limit");
+            }
+            io.github.sandboxdemo.api.SandboxResourceLimits.Builder resourceBuilder =
+                    io.github.sandboxdemo.api.SandboxResourceLimits.builder();
+            if (memory > 0) {
+                resourceBuilder.memoryBytes(memory);
+            }
+            if (processes > 0) {
+                resourceBuilder.processes(processes);
+            }
+            if (cpu > 0) {
+                resourceBuilder.cpuTime(Duration.ofMillis(cpu));
+            }
+            if (disk > 0) {
+                resourceBuilder.diskBytes(disk);
+            }
             Map<String, String> environment = readMap(input);
             List<String> capabilitySids = readStrings(input, MAX_PATHS);
             if (capabilitySids.isEmpty()) {
@@ -153,7 +180,9 @@ final class WindowsWorkerProtocol {
                             allowPathSearch,
                             io.github.sandboxdemo.api.OutputLimitAction.values()[action],
                             combined,
-                            io.github.sandboxdemo.api.OutputCallbackMode.values()[callback]);
+                            io.github.sandboxdemo.api.OutputCallbackMode.values()[callback],
+                            resourceBuilder.build(),
+                            isolation);
             return new WorkerRequest(
                     expectedSid,
                     executable,

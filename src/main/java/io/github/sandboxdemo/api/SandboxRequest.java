@@ -492,6 +492,16 @@ public final class SandboxRequest {
             return this;
         }
 
+        public Builder resourceLimits(SandboxResourceLimits limits) {
+            policy.resourceLimits(limits);
+            return this;
+        }
+
+        public Builder requiredIsolation(SandboxIsolationLevel level) {
+            policy.requiredIsolation(level);
+            return this;
+        }
+
         public Builder timeout(Duration timeout) {
             policy.timeout(timeout);
             return this;

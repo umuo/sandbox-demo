@@ -133,7 +133,9 @@ public final class PathPolicyValidator {
                     policy.allowPathSearch(),
                     policy.onOutputLimit(),
                     policy.maxCombinedOutputBytes(),
-                    policy.outputCallbackMode());
+                    policy.outputCallbackMode(),
+                    policy.resourceLimits(),
+                    policy.requiredIsolation());
         } catch (SandboxException e) {
             if (temp != null) {
                 cleanupDirectory(temp);

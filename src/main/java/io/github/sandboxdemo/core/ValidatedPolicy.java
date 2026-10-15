@@ -9,6 +9,8 @@ import java.util.List;
 
 public final class ValidatedPolicy {
 
+    private final io.github.sandboxdemo.api.SandboxResourceLimits resourceLimits;
+    private final io.github.sandboxdemo.api.SandboxIsolationLevel requiredIsolation;
     private final Path workingDirectory;
     private final List<Path> readableRoots;
     private final List<Path> writableRoots;
@@ -68,6 +70,45 @@ public final class ValidatedPolicy {
             io.github.sandboxdemo.api.OutputLimitAction onOutputLimit,
             int maxCombinedOutputBytes,
             io.github.sandboxdemo.api.OutputCallbackMode outputCallbackMode) {
+        this(
+                workingDirectory,
+                readableRoots,
+                writableRoots,
+                protectedPaths,
+                privateTempDirectory,
+                networkPolicy,
+                readPolicy,
+                deletionPolicy,
+                timeout,
+                maxOutputBytes,
+                allowPathSearch,
+                onOutputLimit,
+                maxCombinedOutputBytes,
+                outputCallbackMode,
+                io.github.sandboxdemo.api.SandboxResourceLimits.none(),
+                io.github.sandboxdemo.api.SandboxIsolationLevel.UNKNOWN);
+    }
+
+    public ValidatedPolicy(
+            Path workingDirectory,
+            List<Path> readableRoots,
+            List<Path> writableRoots,
+            List<Path> protectedPaths,
+            Path privateTempDirectory,
+            NetworkPolicy networkPolicy,
+            ReadPolicy readPolicy,
+            DeletionPolicy deletionPolicy,
+            Duration timeout,
+            int maxOutputBytes,
+            boolean allowPathSearch,
+            io.github.sandboxdemo.api.OutputLimitAction onOutputLimit,
+            int maxCombinedOutputBytes,
+            io.github.sandboxdemo.api.OutputCallbackMode outputCallbackMode,
+            io.github.sandboxdemo.api.SandboxResourceLimits resourceLimits,
+            io.github.sandboxdemo.api.SandboxIsolationLevel requiredIsolation) {
+        this.resourceLimits = java.util.Objects.requireNonNull(resourceLimits, "resourceLimits");
+        this.requiredIsolation =
+                java.util.Objects.requireNonNull(requiredIsolation, "requiredIsolation");
         if (maxOutputBytes < 1
                 || maxOutputBytes > 64 * 1024 * 1024
                 || maxCombinedOutputBytes < 0
@@ -106,7 +147,20 @@ public final class ValidatedPolicy {
                 deletionPolicy,
                 timeout,
                 8192,
-                false);
+                false,
+                io.github.sandboxdemo.api.OutputLimitAction.TRUNCATE,
+                0,
+                io.github.sandboxdemo.api.OutputCallbackMode.RAW,
+                resourceLimits,
+                requiredIsolation);
+    }
+
+    public io.github.sandboxdemo.api.SandboxResourceLimits resourceLimits() {
+        return resourceLimits;
+    }
+
+    public io.github.sandboxdemo.api.SandboxIsolationLevel requiredIsolation() {
+        return requiredIsolation;
     }
 
     public Path workingDirectory() {

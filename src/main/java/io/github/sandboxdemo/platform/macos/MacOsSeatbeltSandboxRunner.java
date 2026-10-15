@@ -26,6 +26,11 @@ public final class MacOsSeatbeltSandboxRunner implements SandboxRunner {
     private static final Path SANDBOX_EXEC = java.nio.file.Paths.get("/usr/bin/sandbox-exec");
 
     @Override
+    public io.github.sandboxdemo.api.SandboxIsolationLevel isolationLevel() {
+        return io.github.sandboxdemo.api.SandboxIsolationLevel.OS_PROCESS;
+    }
+
+    @Override
     public boolean supportsEnvironment(io.github.sandboxdemo.api.SandboxRequest request) {
         return true;
     }
@@ -117,6 +122,7 @@ public final class MacOsSeatbeltSandboxRunner implements SandboxRunner {
             context.managedBackend();
             context.checkActive();
         }
+        io.github.sandboxdemo.core.ResourceAdmission.validate(request.policy(), this);
         ValidatedPolicy policy = PathPolicyValidator.validate(request);
         try {
             Map<String, String> environment = EnvironmentPolicy.build(request, policy);
@@ -146,6 +152,7 @@ public final class MacOsSeatbeltSandboxRunner implements SandboxRunner {
             context.managedBackend();
             context.checkActive();
         }
+        io.github.sandboxdemo.core.ResourceAdmission.validate(request.policy(), this);
         ValidatedPolicy policy = PathPolicyValidator.validate(request);
         try {
             Map<String, String> environment = EnvironmentPolicy.build(request, policy);

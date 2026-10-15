@@ -268,7 +268,7 @@ final class WindowsRestrictedProcessLauncher {
                     createHandleList(
                             io.github.sandboxdemo.core.Java8.listOf(
                                     stdinRead, stdoutWrite, stderrWrite));
-            job = createKillOnCloseJob();
+            job = createKillOnCloseJob(policy.resourceLimits(), policy.requiredIsolation());
 
             WindowsNative.STARTUPINFOEX startup = new WindowsNative.STARTUPINFOEX();
             startup.StartupInfo.cb = startup.size();
@@ -830,7 +830,19 @@ final class WindowsRestrictedProcessLauncher {
         return new HandleList(list, handleArray);
     }
 
-    private static Pointer createKillOnCloseJob() throws SandboxException {
+    private static Pointer createKillOnCloseJob(
+            io.github.sandboxdemo.api.SandboxResourceLimits requested,
+            io.github.sandboxdemo.api.SandboxIsolationLevel isolation)
+            throws SandboxException {
+        if (requested.cpuTimeMillis() != 0
+                || requested.diskBytes() != 0
+                || !io.github.sandboxdemo.api.SandboxIsolationLevel.OS_PROCESS.satisfies(
+                        isolation)) {
+            throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.POLICY_UNSUPPORTED,
+                    io.github.sandboxdemo.api.SandboxPhase.ADMISSION,
+                    "unsupported native resource or isolation requirement");
+        }
         int maxProcesses =
                 positiveEnvironmentInt("SANDBOX_WINDOWS_MAX_PROCESSES", DEFAULT_MAX_PROCESSES);
         long memoryMib =
@@ -844,6 +856,14 @@ final class WindowsRestrictedProcessLauncher {
                     io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
                     "SANDBOX_WINDOWS_MAX_MEMORY_MIB is too large",
                     e);
+        }
+        memoryBytes = effectiveMemoryLimit(memoryBytes, requested.memoryBytes());
+        maxProcesses = effectiveProcessLimit(maxProcesses, requested.processes());
+        if (Native.SIZE_T_SIZE == 4 && memoryBytes > 0xffffffffL) {
+            throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.POLICY_INVALID,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                    "memory limit exceeds native pointer size");
         }
         Pointer job = Kernel32.INSTANCE.CreateJobObjectW(null, null);
         if (isInvalid(job)) {
@@ -865,6 +885,14 @@ final class WindowsRestrictedProcessLauncher {
             throw win32("SetInformationJobObject", error);
         }
         return job;
+    }
+
+    static long effectiveMemoryLimit(long host, long requested) {
+        return requested == 0 ? host : Math.min(host, requested);
+    }
+
+    static int effectiveProcessLimit(int host, int requested) {
+        return requested == 0 ? host : Math.min(host, requested);
     }
 
     private static int positiveEnvironmentInt(String name, int defaultValue)

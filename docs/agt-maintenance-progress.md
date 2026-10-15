@@ -152,3 +152,19 @@ SDK-04/05 提交 `fc5e254` 的 [Actions](https://github.com/umuo/sandbox-demo/ac
 补充删除边界审查：工作区与执行 temp 共用不跟随链接的删除器，Windows 显式检测全部 reparse point，在进入 junction 前删除链接本身。新增 Windows junction/外部合成 canary 验收，避免仅依赖 `Files.isSymbolicLink`。根身份被替换时仍返回 UNKNOWN，不删除替代目录。
 
 首次 SDK-06 矩阵 `7acf09b`：Linux/macOS 全通过，Windows 发现工作区 `BasicFileAttributes.fileKey()` 为空，导致实际目录未替换仍返回 UNKNOWN。修复为 Windows 使用原生 FILE_ID_INFO（卷号 + 128 位文件 ID）比较身份，句柄始终关闭；无法取得证据仍拒绝确认。同步修复单元测试依赖 Windows 默认 HOST 的问题，显式声明严格读取策略。未放宽 UNKNOWN 的成功条件。
+
+## SDK-07：硬资源与隔离机制准入（2026-10-15）
+
+验收范围：新增逐请求资源与隔离机制契约；不支持的非零资源维度或 VM 要求，在准备及启动前明确 `POLICY_UNSUPPORTED / ADMISSION`。Windows 复用 Job 强制总提交内存和活动进程数，请求只能收紧宿主上限；Linux/macOS 不提供的硬限制仍拒绝。CPU、磁盘及真实 VM 部署由宿主扩展承担，不将 timeout、输出额度、有限队列或 FULL 包装为硬限制。不要求各平台同一实现。
+
+方案 spike：现有 Windows launcher 已使用 Job 内存及进程限额，worker 启动环境已传递可信宿主上限。复用原生机制，增加请求传递及单一准入器；无需新依赖。参考 [Job 限制](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-jobobject_basic_limit_information) 与 [扩展限额结构](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-jobobject_extended_limit_information)。Linux [cgroup v2](https://www.kernel.org/doc/html/latest/admin-guide/cgroup-v2.html) 需要实际委派与部署，其 memory.max/cpu.max 计费语义不等于本接口的提交内存/累计 CPU 时间；本阶段不伪装部署该控制器。
+
+新增 `SandboxResourceLimits`、`SandboxIsolationLevel`、runner 显式支持方法，以及客户端和内建后端准入。旧配置空限额保持兼容，旧自定义后端拒绝新增要求。Windows 内存/进程上限应用 `min(host, request)`，在恢复 suspended 目标前写入 Job；请求环境不能放宽宿主限额。预检保留同一资源配置，Windows worker 协议升 v7 并拒绝旧版本，安装须重新供应同版本 worker。
+
+单元测试覆盖每一限制的拒绝、隔离要求、UNKNOWN 不满足显式机制、legacy FULL 不取得资源能力、扩展 SPI 显式声明、宿主上限不能放宽，以及协议保留全部资源字段。真实 POSIX 预检验证 OS_PROCESS 可接受。Windows 原生新增有界 C# 程序：固定一次 128 MiB 提交内存分配或启动一个子进程，各做有限额/无请求限额对照，检查结果、Job 与 temp 回收；不运行无界消耗程序。资源拒绝未订阅 Job 通知，不从退出码猜测 RESOURCE_LIMIT；Windows hostResources UNKNOWN 继续保留。
+
+本机 macOS 15.5 arm64：实际 Zulu JDK 8u282 完整 verify 通过；Zulu 17.0.11 和 21.0.4 完整 macOS 原生测试在最后一个准入单元用例加入前均为 141 项、0 失败、0 错误、19 跳过。十个消费示例在实际 JDK 8 和 JDK 17/21 的 Java 8 编译模式下通过；JDK 8 运行新示例明确返回 POLICY_UNSUPPORTED/ADMISSION，资源均 NOT_REQUIRED，工作区清理 CONFIRMED。严格文档构建通过。本机未运行 Windows 的 C# 原生验收，结果须由本阶段对应 Actions 确认。
+
+SDK-06 最终提交 `4794d73` 的 [Actions](https://github.com/umuo/sandbox-demo/actions/runs/38665437304) 全部 12 个任务已确认通过。本阶段完成准入接口和 Windows 两项限额，不表示任意代码或多租户威胁模型已验收：严格读取/网络边界、缺失 CPU/磁盘约束和独立回收 UNKNOWN 均仍需宿主处理。没有发布新 Central 制品。
+
+最终 JDK 8 verify 为 143 项、0 失败、0 错误、34 跳过；另外验证了扩展后端必须同时提供资源维度 KERNEL 声明与显式策略支持，UNKNOWN/BEST_EFFORT 或仅声明 coarse FULL 都不能满足硬限制。

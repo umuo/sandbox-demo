@@ -30,6 +30,16 @@ public final class WindowsProductionSandboxRunner implements SandboxRunner {
     }
 
     @Override
+    public io.github.sandboxdemo.api.SandboxIsolationLevel isolationLevel() {
+        return io.github.sandboxdemo.api.SandboxIsolationLevel.OS_PROCESS;
+    }
+
+    @Override
+    public boolean supportsResourceLimits(io.github.sandboxdemo.api.SandboxResourceLimits limits) {
+        return limits.cpuTimeMillis() == 0 && limits.diskBytes() == 0;
+    }
+
+    @Override
     public boolean supportsEnvironment(io.github.sandboxdemo.api.SandboxRequest request) {
         return true;
     }
@@ -88,6 +98,7 @@ public final class WindowsProductionSandboxRunner implements SandboxRunner {
                 context == null
                         ? null
                         : context.track(io.github.sandboxdemo.core.ExecutionContext.Resource.HOST);
+        io.github.sandboxdemo.core.ResourceAdmission.validate(request.policy(), this);
         ValidatedPolicy policy = PathPolicyValidator.validate(request);
         try {
             if (policy.readPolicy() != ReadPolicy.HOST) {

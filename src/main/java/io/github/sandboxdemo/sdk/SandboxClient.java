@@ -207,6 +207,25 @@ public final class SandboxClient {
     }
 
     private void validateRequestCapabilities(SandboxRequest request) throws SandboxException {
+        try {
+            io.github.sandboxdemo.core.ResourceAdmission.validate(request.policy(), runner);
+        } catch (RuntimeException | LinkageError failure) {
+            throw new SandboxException(
+                    SandboxErrorCode.BACKEND_UNAVAILABLE,
+                    SandboxPhase.ADMISSION,
+                    "backend resource admission failed",
+                    failure);
+        }
+        io.github.sandboxdemo.api.SandboxResourceLimits limits = request.policy().resourceLimits();
+        requireHardCapability(
+                limits.memoryBytes() != 0,
+                io.github.sandboxdemo.api.SandboxCapability.MEMORY_LIMIT);
+        requireHardCapability(
+                limits.processes() != 0, io.github.sandboxdemo.api.SandboxCapability.PROCESS_LIMIT);
+        requireHardCapability(
+                limits.cpuTimeMillis() != 0, io.github.sandboxdemo.api.SandboxCapability.CPU_LIMIT);
+        requireHardCapability(
+                limits.diskBytes() != 0, io.github.sandboxdemo.api.SandboxCapability.DISK_LIMIT);
         io.github.sandboxdemo.core.EnvironmentPolicy.validate(request);
         boolean supported;
         try {
@@ -225,6 +244,19 @@ public final class SandboxClient {
                     "backend does not support requested environment or temp policy");
         }
         validateCapabilities(request.policy());
+    }
+
+    private void requireHardCapability(
+            boolean requested, io.github.sandboxdemo.api.SandboxCapability capability)
+            throws SandboxException {
+        if (requested
+                && capabilities.support(capability).guarantee()
+                        != io.github.sandboxdemo.api.SandboxGuarantee.KERNEL) {
+            throw new SandboxBackendUnavailableException(
+                    SandboxErrorCode.POLICY_UNSUPPORTED,
+                    SandboxPhase.ADMISSION,
+                    "requested hard resource has no kernel guarantee");
+        }
     }
 
     private void validateCapabilities(SandboxPolicy policy) throws SandboxException {
@@ -280,6 +312,11 @@ public final class SandboxClient {
     }
 
     /** Returns the selected backend name for logging and metrics. */
+    /** 后端声明的隔离机制；UNKNOWN 不能满足显式机制要求。 */
+    public io.github.sandboxdemo.api.SandboxIsolationLevel isolationLevel() {
+        return runner.isolationLevel();
+    }
+
     public String backendName() {
         return runner.backendName();
     }

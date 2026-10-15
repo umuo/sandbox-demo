@@ -51,6 +51,11 @@ public final class LinuxBubblewrapSandboxRunner implements SandboxRunner {
     }
 
     @Override
+    public io.github.sandboxdemo.api.SandboxIsolationLevel isolationLevel() {
+        return io.github.sandboxdemo.api.SandboxIsolationLevel.OS_PROCESS;
+    }
+
+    @Override
     public boolean supportsEnvironment(io.github.sandboxdemo.api.SandboxRequest request) {
         return true;
     }
@@ -159,6 +164,7 @@ public final class LinuxBubblewrapSandboxRunner implements SandboxRunner {
             context.managedBackend();
             context.checkActive();
         }
+        io.github.sandboxdemo.core.ResourceAdmission.validate(request.policy(), this);
         ValidatedPolicy policy = PathPolicyValidator.validate(request);
         try {
             Map<String, String> environment = EnvironmentPolicy.build(request, policy);

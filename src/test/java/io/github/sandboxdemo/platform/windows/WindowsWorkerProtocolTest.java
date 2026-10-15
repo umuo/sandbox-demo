@@ -41,6 +41,15 @@ class WindowsWorkerProtocolTest {
                                 .maxCombinedOutputBytes(19)
                                 .outputCallbackMode(
                                         io.github.sandboxdemo.api.OutputCallbackMode.RETAINED)
+                                .resourceLimits(
+                                        io.github.sandboxdemo.api.SandboxResourceLimits.builder()
+                                                .memoryBytes(96L * 1024 * 1024)
+                                                .processes(3)
+                                                .cpuTime(Duration.ofSeconds(2))
+                                                .diskBytes(4096)
+                                                .build())
+                                .requiredIsolation(
+                                        io.github.sandboxdemo.api.SandboxIsolationLevel.OS_PROCESS)
                                 .timeout(Duration.ofSeconds(3))
                                 .build());
         try {
@@ -63,6 +72,9 @@ class WindowsWorkerProtocolTest {
             assertArrayEquals(request.standardInput(), decoded.standardInput());
             assertEquals(policy.readableRoots(), decoded.policy().readableRoots());
             assertEquals(policy.readPolicy(), decoded.policy().readPolicy());
+            assertEquals(policy.resourceLimits(), decoded.policy().resourceLimits());
+            assertEquals(policy.requiredIsolation(), decoded.policy().requiredIsolation());
+            assertEquals(policy.resourceLimits(), policy.forProbe().resourceLimits());
             assertEquals(policy.deletionPolicy(), decoded.policy().deletionPolicy());
             assertEquals(policy.onOutputLimit(), decoded.policy().onOutputLimit());
             assertEquals(
