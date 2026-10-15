@@ -83,3 +83,12 @@ gpg --keyserver hkps://keys.openpgp.org --send-keys YOUR_FULL_FINGERPRINT
 2026-10-14 重新上传 `0.1.0-alpha.1` 后 Central 校验通过（VALIDATED），部署 ID 为
 `f98fa6ad-727e-4a3b-aa13-d65fa18cba57`，现已在 Portal 发布，公共仓库中的 SDK、POM、sources、Javadoc 与最终上传制品一致，PGP 签名验证通过；全新 Maven 缓存下载 SDK 及 JNA 传递依赖也已通过。
 本地验收记录和发布包保存在 `target/central-release-evidence/`。
+
+## 0.1.0-alpha.2 发布记录
+
+2026-10-15，源码提交 `b20d620`，坐标 `io.github.umuo:agent-sandbox-sdk:0.1.0-alpha.2`。
+当前提交的 GitHub Actions 完整工作流成功；本地 Maven 测试共 143 项，零失败、零错误，34 项平台/集成测试跳过，外部 consumer 编译成功。
+独立发布副本完成构建、签名、上传和 Central 校验，随后通过 Publisher API 发布。
+部署 ID：`41ac2f89-1e35-4118-95e6-b48a82b4425c`，状态 PUBLISHED。
+主仓库保留 `1.0.0-SNAPSHOT` 开发版本；本次未创建 Git tag。
+发布记录保存在 `target/central-release-evidence/0.1.0-alpha.2/`。

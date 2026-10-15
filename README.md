@@ -69,7 +69,7 @@ mvn package
 <dependency>
     <groupId>io.github.umuo</groupId>
     <artifactId>agent-sandbox-sdk</artifactId>
-    <version>0.1.0-alpha.1</version>
+    <version>0.1.0-alpha.2</version>
 </dependency>
 ```
 
