@@ -148,3 +148,5 @@ CI 新增 `target/test-evidence.json` 与 Step Summary，汇总实际执行/失�
 SDK-04/05 提交 `fc5e254` 的 [Actions](https://github.com/umuo/sandbox-demo/actions/runs/38661041090) 已确认全部 12 个任务通过；本阶段 Linux/Windows 原生结果需以本阶段提交对应的新 Actions 为准。SDK-07 硬资源准入尚未实现；macOS processes UNKNOWN 和 Windows hostResources UNKNOWN 的独立回收边界继续保留。
 
 最终实际 Zulu JDK 8u282 `mvn verify`：132 项，0 失败、0 错误、31 跳过（默认未启用原生验收）；包含打包、格式及依赖分析。JDK 17 格式检查与严格文档构建通过。
+
+补充删除边界审查：工作区与执行 temp 共用不跟随链接的删除器，Windows 显式检测全部 reparse point，在进入 junction 前删除链接本身。新增 Windows junction/外部合成 canary 验收，避免仅依赖 `Files.isSymbolicLink`。根身份被替换时仍返回 UNKNOWN，不删除替代目录。

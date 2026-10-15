@@ -411,6 +411,6 @@ PATH、目录变量、ENV/BASH_ENV、LD_*、DYLD_*、Java/JDK 选项、Python/No
 
 `workspace.cleanup()`/`cleanupState()` 独立报告 CONFIRMED/FAILED/UNKNOWN，`close()` 尝试清理，调用后须检查状态。初始 UNKNOWN 表示尚未清理；删除失败可见并可重试。它不会自动取消任务或等待后台资源，不能在执行仍使用目录时调用。默认字符串只含状态；路径需显式 getter。temp 回收继续通过执行句柄/预检的 `cleanup().temporaryFiles()` 观察，工作区由宿主独立管理。
 
-删除不跟随符号链接，并检查工作区根的文件身份；无法确认根身份时返回 UNKNOWN。此接口不复制输入、不清洗硬链接、不提供快照，也不能消除父目录被外部重命名的竞态。宿主负责父目录可信性、输入供应与链接审查，不应把已有任意工程直接视为安全工作区。异步任务需结合 SDK-02 的独立回收证据；macOS processes UNKNOWN 和 Windows hostResources UNKNOWN 仍保留。
+删除不跟随符号链接或 Windows junction/reparse point，并检查工作区根的文件身份；无法确认根身份时返回 UNKNOWN。此接口不复制输入、不清洗硬链接、不提供快照，也不能消除父目录被外部重命名的竞态。宿主负责父目录可信性、输入供应与链接审查，不应把已有任意工程直接视为安全工作区。异步任务需结合 SDK-02 的独立回收证据；macOS processes UNKNOWN 和 Windows hostResources UNKNOWN 仍保留。
 
 Java 8 消费示例：`examples/sdk-consumer/src/main/java/example/SandboxStrictEnvironmentExample.java`。传入一个由宿主保护的空父目录；Windows 默认后端仍要求非管理员宿主，专用账户部署须使用显式后端配置。

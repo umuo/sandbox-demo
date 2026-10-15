@@ -94,4 +94,38 @@ class SandboxWorkspaceTest {
             assertEquals(SandboxCleanupState.CONFIRMED, workspace.cleanup());
         }
     }
+
+    @Test
+    @EnabledOnOs(OS.WINDOWS)
+    void windowsJunctionCleanupPreservesExternalCanary() throws Exception {
+        Path outside = Files.createDirectory(parent.resolve("outside"));
+        Path canary = Files.write(outside.resolve("canary"), new byte[] {42});
+        try (SandboxWorkspace workspace = SandboxWorkspace.create(parent)) {
+            Path link = workspace.directory().resolve("junction");
+            String cmd =
+                    java.nio.file.Paths.get(
+                                    System.getenv().getOrDefault("SystemRoot", "C:\\Windows"),
+                                    "System32",
+                                    "cmd.exe")
+                            .toString();
+            Process process =
+                    new ProcessBuilder(
+                                    cmd,
+                                    "/d",
+                                    "/s",
+                                    "/c",
+                                    "mklink /J \"" + link + "\" \"" + outside + "\"")
+                            .redirectErrorStream(true)
+                            .start();
+            try {
+                assertTrue(process.waitFor(20, java.util.concurrent.TimeUnit.SECONDS));
+                assertEquals(0, process.exitValue(), "junction fixture creation failed");
+                assertTrue(io.github.sandboxdemo.core.PrivateDirectories.isLink(link));
+                assertEquals(SandboxCleanupState.CONFIRMED, workspace.cleanup());
+                assertArrayEquals(new byte[] {42}, Files.readAllBytes(canary));
+            } finally {
+                process.destroyForcibly();
+            }
+        }
+    }
 }

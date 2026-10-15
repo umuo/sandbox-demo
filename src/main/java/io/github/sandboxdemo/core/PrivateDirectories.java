@@ -56,4 +56,59 @@ public final class PrivateDirectories {
             throw failure;
         }
     }
+
+    /** Windows junction 和其他 reparse point 均视为链接，不能进入其目标。 */
+    public static boolean isLink(Path path) throws IOException {
+        if (OperatingSystem.current() != OperatingSystem.WINDOWS) {
+            return Files.isSymbolicLink(path);
+        }
+        int attributes =
+                com.sun.jna.platform.win32.Kernel32.INSTANCE.GetFileAttributes(path.toString());
+        if (attributes == -1) {
+            throw new IOException("failed to inspect directory reparse attributes");
+        }
+        return (attributes & 0x400) != 0;
+    }
+
+    /** 不跟随符号链接或 Windows junction；删除失败保守返回 false。 */
+    public static boolean removeTree(Path root) {
+        try {
+            if (Files.notExists(root, LinkOption.NOFOLLOW_LINKS)) {
+                return true;
+            }
+            Files.walkFileTree(
+                    root,
+                    new SimpleFileVisitor<Path>() {
+                        @Override
+                        public FileVisitResult preVisitDirectory(
+                                Path path, BasicFileAttributes attrs) throws IOException {
+                            if (isLink(path)) {
+                                Files.delete(path);
+                                return FileVisitResult.SKIP_SUBTREE;
+                            }
+                            return FileVisitResult.CONTINUE;
+                        }
+
+                        @Override
+                        public FileVisitResult visitFile(Path path, BasicFileAttributes attrs)
+                                throws IOException {
+                            Files.delete(path);
+                            return FileVisitResult.CONTINUE;
+                        }
+
+                        @Override
+                        public FileVisitResult postVisitDirectory(Path path, IOException error)
+                                throws IOException {
+                            if (error != null) {
+                                throw error;
+                            }
+                            Files.delete(path);
+                            return FileVisitResult.CONTINUE;
+                        }
+                    });
+            return Files.notExists(root, LinkOption.NOFOLLOW_LINKS);
+        } catch (IOException | RuntimeException | LinkageError failure) {
+            return false;
+        }
+    }
 }

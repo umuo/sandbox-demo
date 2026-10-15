@@ -68,7 +68,7 @@ public final class SandboxWorkspace implements AutoCloseable {
         try {
             if (Files.notExists(root, LinkOption.NOFOLLOW_LINKS)) {
                 cleanup = SandboxCleanupState.CONFIRMED;
-            } else if (Files.isSymbolicLink(root)
+            } else if (PrivateDirectories.isLink(root)
                     || rootKey == null
                     || !rootKey.equals(
                             Files.readAttributes(
@@ -80,7 +80,7 @@ public final class SandboxWorkspace implements AutoCloseable {
             } else {
                 cleanup = remove(root) ? SandboxCleanupState.CONFIRMED : SandboxCleanupState.FAILED;
             }
-        } catch (IOException | RuntimeException failure) {
+        } catch (IOException | RuntimeException | LinkageError failure) {
             cleanup = SandboxCleanupState.FAILED;
         }
         return cleanup;
@@ -101,30 +101,6 @@ public final class SandboxWorkspace implements AutoCloseable {
     }
 
     private static boolean remove(Path root) {
-        try {
-            Files.walkFileTree(
-                    root,
-                    new SimpleFileVisitor<Path>() {
-                        @Override
-                        public FileVisitResult visitFile(Path path, BasicFileAttributes attrs)
-                                throws IOException {
-                            Files.delete(path);
-                            return FileVisitResult.CONTINUE;
-                        }
-
-                        @Override
-                        public FileVisitResult postVisitDirectory(Path path, IOException error)
-                                throws IOException {
-                            if (error != null) {
-                                throw error;
-                            }
-                            Files.delete(path);
-                            return FileVisitResult.CONTINUE;
-                        }
-                    });
-            return Files.notExists(root, LinkOption.NOFOLLOW_LINKS);
-        } catch (IOException | RuntimeException failure) {
-            return false;
-        }
+        return PrivateDirectories.removeTree(root);
     }
 }

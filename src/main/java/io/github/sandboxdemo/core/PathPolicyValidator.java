@@ -6,11 +6,9 @@ import io.github.sandboxdemo.api.SandboxPhase;
 import io.github.sandboxdemo.api.SandboxPolicy;
 import java.io.IOException;
 import java.nio.file.Files;
-import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermission;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Set;
@@ -199,28 +197,9 @@ public final class PathPolicyValidator {
     }
 
     private static io.github.sandboxdemo.api.SandboxCleanupState cleanupDirectory(Path directory) {
-        java.util.concurrent.atomic.AtomicBoolean failed =
-                new java.util.concurrent.atomic.AtomicBoolean();
-        if (directory != null && !Files.notExists(directory, LinkOption.NOFOLLOW_LINKS)) {
-            try (java.util.stream.Stream<Path> paths = Files.walk(directory)) {
-                paths.sorted(Comparator.reverseOrder())
-                        .forEach(
-                                path -> {
-                                    try {
-                                        Files.deleteIfExists(path);
-                                    } catch (IOException | SecurityException error) {
-                                        failed.set(true);
-                                    }
-                                });
-            } catch (IOException | java.io.UncheckedIOException | SecurityException error) {
-                failed.set(true);
-            }
-        }
-        if (directory != null && !Files.notExists(directory, LinkOption.NOFOLLOW_LINKS)) {
-            failed.set(true);
-        }
+        boolean removed = directory == null || PrivateDirectories.removeTree(directory);
         io.github.sandboxdemo.api.SandboxCleanupState state =
-                failed.get()
+                !removed
                         ? io.github.sandboxdemo.api.SandboxCleanupState.FAILED
                         : io.github.sandboxdemo.api.SandboxCleanupState.CONFIRMED;
         if (ExecutionContext.current() != null) {

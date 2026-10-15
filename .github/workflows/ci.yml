@@ -71,13 +71,18 @@ jobs:
           SANDBOX_WINDOWS_PRODUCTION_TEST: '1'
           SECRET_TEST_VALUE: abc123
         run: mvn --batch-mode --no-transfer-progress test
-      - name: Annotate Windows native cleanup failures
+      - name: Annotate Windows test failures
         if: runner.os == 'Windows' && failure()
         shell: pwsh
         run: |
-          Get-ChildItem target/surefire-reports -Filter '*.xml' | ForEach-Object {
-            Select-String -Path $_.FullName -Pattern 'Win32=\d+' | ForEach-Object {
-              Write-Output "::error::$($_.Line.Trim())"
+          Get-ChildItem target/surefire-reports -Filter 'TEST-*.xml' | ForEach-Object {
+            [xml]$report = Get-Content -LiteralPath $_.FullName -Raw
+            foreach ($case in $report.SelectNodes('//testcase[failure or error]')) {
+              $failure = $case.SelectSingleNode('failure|error')
+              $message = "$($case.classname).$($case.name): $($failure.GetAttribute('message'))"
+              if ($message.Length -gt 2000) { $message = $message.Substring(0, 2000) }
+              $message = $message.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+              Write-Output "::error::$message"
             }
           }
       - name: Compile external SDK consumer
