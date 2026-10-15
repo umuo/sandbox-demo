@@ -71,7 +71,9 @@ jobs:
         shell: pwsh
         run: |
           $compiler = Join-Path $env:WINDIR 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
-          & $compiler /nologo /target:exe /platform:x64 /out:target/resource-probe.exe .github/scripts/resource-probe.cs
+          $source = (Resolve-Path '.github/scripts/resource-probe.cs').Path
+          $destination = Join-Path (Get-Location) 'target/resource-probe.exe'
+          & $compiler '/nologo' '/target:exe' '/platform:x64' "/out:$destination" $source
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Test production Windows sandbox
         if: runner.os == 'Windows'
@@ -83,6 +85,10 @@ jobs:
         if: runner.os == 'Windows' && failure()
         shell: pwsh
         run: |
+          if (-not (Test-Path target/surefire-reports)) {
+            Write-Output 'No JUnit reports: failure occurred before tests started.'
+            exit 0
+          }
           Get-ChildItem target/surefire-reports -Filter 'TEST-*.xml' | ForEach-Object {
             [xml]$report = Get-Content -LiteralPath $_.FullName -Raw
             foreach ($case in $report.SelectNodes('//testcase[failure or error]')) {

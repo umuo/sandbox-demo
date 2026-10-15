@@ -168,3 +168,5 @@ SDK-04/05 提交 `fc5e254` 的 [Actions](https://github.com/umuo/sandbox-demo/ac
 SDK-06 最终提交 `4794d73` 的 [Actions](https://github.com/umuo/sandbox-demo/actions/runs/38665437304) 全部 12 个任务已确认通过。本阶段完成准入接口和 Windows 两项限额，不表示任意代码或多租户威胁模型已验收：严格读取/网络边界、缺失 CPU/磁盘约束和独立回收 UNKNOWN 均仍需宿主处理。没有发布新 Central 制品。
 
 最终 JDK 8 verify 为 143 项、0 失败、0 错误、34 跳过；另外验证了扩展后端必须同时提供资源维度 KERNEL 声明与显式策略支持，UNKNOWN/BEST_EFFORT 或仅声明 coarse FULL 都不能满足硬限制。
+
+首次 SDK-07 Windows 构建在 C# 验收程序编译阶段报告 CS1504：传入的相对源码路径被解析到仓库根。改用 Resolve-Path 的绝对源码路径及显式输出路径；未开始 JUnit 时注释步骤正常报告无测试数据，不制造第二个失败。原生限额验收标准保持不变，结果以修复提交为准。
