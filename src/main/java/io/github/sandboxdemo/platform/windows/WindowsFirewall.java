@@ -98,7 +98,10 @@ final class WindowsFirewall {
                 java.nio.file.Paths.get(
                         systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
         if (!Files.isRegularFile(powershell)) {
-            throw new SandboxException("Windows PowerShell was not found: " + powershell);
+            throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                    "Windows PowerShell was not found: " + powershell);
         }
         String encoded =
                 Base64.getEncoder().encodeToString(script.getBytes(StandardCharsets.UTF_16LE));
@@ -118,6 +121,8 @@ final class WindowsFirewall {
             int exitCode = process.waitFor();
             if (exitCode != 0) {
                 throw new SandboxException(
+                        io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                        io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
                         "failed to "
                                 + operation
                                 + " (exit="
@@ -126,7 +131,11 @@ final class WindowsFirewall {
                                 + new String(output, StandardCharsets.UTF_8).trim());
             }
         } catch (IOException e) {
-            throw new SandboxException("failed to launch Windows PowerShell to " + operation, e);
+            throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                    "failed to launch Windows PowerShell to " + operation,
+                    e);
         }
     }
 }

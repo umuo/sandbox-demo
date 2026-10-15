@@ -42,23 +42,33 @@ final class WindowsWorkerRuntime {
             Path java = javaHome.resolve("bin").resolve("java.exe").toRealPath();
             if (!Files.isRegularFile(java)) {
                 throw new SandboxBackendUnavailableException(
+                        io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                        io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
                         "Java worker executable is missing: " + java);
             }
             if (policy.writableRoots().stream().anyMatch(root -> overlaps(root, javaHome))) {
                 throw new SandboxBackendUnavailableException(
+                        io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                        io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
                         "installed Java runtime must not overlap a writable root: " + javaHome);
             }
             List<Path> workerJars = installedClassPath(installation.home());
             for (Path workerJar : workerJars) {
                 if (policy.writableRoots().stream().anyMatch(root -> overlaps(root, workerJar))) {
                     throw new SandboxBackendUnavailableException(
+                            io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                            io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
                             "installed Windows worker JAR must not overlap a writable root: "
                                     + workerJar);
                 }
             }
             return new WindowsWorkerRuntime(java, workerJars);
         } catch (IOException e) {
-            throw new SandboxException("failed to resolve the trusted Windows worker runtime", e);
+            throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                    "failed to resolve the trusted Windows worker runtime",
+                    e);
         }
     }
 
@@ -67,11 +77,17 @@ final class WindowsWorkerRuntime {
             Path java = installation.javaHome().toRealPath().resolve("bin").resolve("java.exe");
             if (!Files.isRegularFile(java)) {
                 throw new SandboxBackendUnavailableException(
+                        io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                        io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
                         "installed Java worker executable is missing: " + java);
             }
             installedClassPath(installation.home());
         } catch (IOException e) {
-            throw new SandboxException("failed to verify the installed Windows worker runtime", e);
+            throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                    "failed to verify the installed Windows worker runtime",
+                    e);
         }
     }
 
@@ -81,6 +97,8 @@ final class WindowsWorkerRuntime {
             for (Class<?> requiredClass : REQUIRED_CLASSES) {
                 if (requiredClass.getProtectionDomain().getCodeSource() == null) {
                     throw new SandboxBackendUnavailableException(
+                            io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                            io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
                             "cannot locate packaged runtime for " + requiredClass.getName());
                 }
                 Path source =
@@ -96,6 +114,8 @@ final class WindowsWorkerRuntime {
                 if (!Files.isRegularFile(source)
                         || !source.getFileName().toString().toLowerCase().endsWith(".jar")) {
                     throw new SandboxBackendUnavailableException(
+                            io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                            io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
                             "Windows setup requires packaged SDK dependencies, not an exploded "
                                     + "classes directory: "
                                     + source);
@@ -105,7 +125,11 @@ final class WindowsWorkerRuntime {
             }
             return io.github.sandboxdemo.core.Java8.copyList(result);
         } catch (java.net.URISyntaxException | IOException e) {
-            throw new SandboxException("failed to resolve packaged Windows worker JARs", e);
+            throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                    "failed to resolve packaged Windows worker JARs",
+                    e);
         }
     }
 
@@ -115,6 +139,8 @@ final class WindowsWorkerRuntime {
         try (java.util.zip.ZipFile archive = new java.util.zip.ZipFile(jar.toFile())) {
             if (archive.getEntry(entry) == null) {
                 throw new SandboxBackendUnavailableException(
+                        io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                        io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
                         "unsupported nested-JAR layout for Windows worker class "
                                 + requiredClass.getName()
                                 + "; run setup from the SDK all.jar CLI instead: "
@@ -148,7 +174,11 @@ final class WindowsWorkerRuntime {
                 Files.move(temporary, checksum, StandardCopyOption.REPLACE_EXISTING);
             }
         } catch (IOException e) {
-            throw new SandboxException("failed to write the Windows worker checksum", e);
+            throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                    "failed to write the Windows worker checksum",
+                    e);
         }
     }
 
@@ -161,10 +191,16 @@ final class WindowsWorkerRuntime {
                     expected.getBytes(java.nio.charset.StandardCharsets.US_ASCII),
                     actual.getBytes(java.nio.charset.StandardCharsets.US_ASCII))) {
                 throw new SandboxException(
+                        io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                        io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
                         "installed Windows worker checksum does not match setup metadata");
             }
         } catch (IOException e) {
-            throw new SandboxException("failed to verify the installed Windows worker", e);
+            throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                    "failed to verify the installed Windows worker",
+                    e);
         }
     }
 
@@ -176,7 +212,11 @@ final class WindowsWorkerRuntime {
         try {
             return sha256(path);
         } catch (IOException e) {
-            throw new SandboxException("failed to hash Windows worker runtime: " + path, e);
+            throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                    "failed to hash Windows worker runtime: " + path,
+                    e);
         }
     }
 
@@ -185,21 +225,31 @@ final class WindowsWorkerRuntime {
         Path manifest = classPathManifest(home);
         if (!Files.isRegularFile(manifest)) {
             throw new SandboxBackendUnavailableException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
                     "installed Windows worker classpath is missing: " + manifest);
         }
         List<String> entries =
                 Files.readAllLines(manifest, java.nio.charset.StandardCharsets.US_ASCII);
         if (entries.isEmpty() || entries.size() > MAX_RUNTIME_JARS) {
-            throw new SandboxException("invalid Windows worker classpath entry count");
+            throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                    "invalid Windows worker classpath entry count");
         }
         List<Path> result = new ArrayList<>(entries.size());
         for (String entry : entries) {
             if (!entry.matches("[A-Za-z0-9._-]+\\.jar")) {
-                throw new SandboxException("invalid Windows worker classpath entry: " + entry);
+                throw new SandboxException(
+                        io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                        io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                        "invalid Windows worker classpath entry: " + entry);
             }
             Path workerJar = runtime.resolve(entry).toRealPath();
             if (!workerJar.getParent().equals(runtime) || !Files.isRegularFile(workerJar)) {
                 throw new SandboxException(
+                        io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                        io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
                         "Windows worker classpath escaped its runtime directory: " + entry);
             }
             verifyChecksum(workerJar);
@@ -224,7 +274,11 @@ final class WindowsWorkerRuntime {
             }
             return io.github.sandboxdemo.core.Java8.toHex(digest.digest());
         } catch (NoSuchAlgorithmException impossible) {
-            throw new SandboxException("SHA-256 is unavailable in this Java runtime", impossible);
+            throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                    "SHA-256 is unavailable in this Java runtime",
+                    impossible);
         }
     }
 

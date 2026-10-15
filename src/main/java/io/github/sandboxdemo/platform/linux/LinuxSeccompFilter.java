@@ -48,6 +48,8 @@ final class LinuxSeccompFilter {
             return filter;
         } catch (IOException e) {
             throw new SandboxBackendUnavailableException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.POLICY_INVALID,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
                     "failed to create the Linux seccomp policy: " + e.getMessage());
         }
     }
@@ -165,6 +167,8 @@ final class LinuxSeccompFilter {
                 return new Architecture(AUDIT_ARCH_AARCH64, 198, 199, 425);
             }
             throw new SandboxBackendUnavailableException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.POLICY_INVALID,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
                     "the Linux seccomp policy supports x86_64 and aarch64 only: " + architecture);
         }
     }

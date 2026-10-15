@@ -365,6 +365,8 @@ final class WindowsAclManager {
             securityDescriptor = descriptor.getValue();
             if (oldDacl.getValue() == null) {
                 throw new SandboxException(
+                        io.github.sandboxdemo.api.SandboxErrorCode.POLICY_INVALID,
+                        io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
                         "refusing to mutate an object with a NULL DACL: " + path);
             }
 
@@ -415,11 +417,16 @@ final class WindowsAclManager {
 
     private static SandboxException win32(String operation) {
         return new SandboxException(
+                io.github.sandboxdemo.api.SandboxErrorCode.POLICY_INVALID,
+                io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
                 operation + " failed, Win32=" + com.sun.jna.Native.getLastError());
     }
 
     private static SandboxException windowsError(String operation, int error) {
-        return new SandboxException(operation + " failed, Win32=" + error);
+        return new SandboxException(
+                io.github.sandboxdemo.api.SandboxErrorCode.POLICY_INVALID,
+                io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                operation + " failed, Win32=" + error);
     }
 
     /** Serializes read/merge/write DACL mutations across SDK processes in the current session. */
@@ -527,6 +534,8 @@ final class WindowsAclManager {
             if (dacl.getValue() == null) {
                 Kernel32.INSTANCE.LocalFree(descriptor.getValue());
                 throw new SandboxException(
+                        io.github.sandboxdemo.api.SandboxErrorCode.POLICY_INVALID,
+                        io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
                         "refusing to snapshot an object with a NULL DACL: " + path);
             }
 
@@ -537,6 +546,8 @@ final class WindowsAclManager {
                 int error = com.sun.jna.Native.getLastError();
                 Kernel32.INSTANCE.LocalFree(descriptor.getValue());
                 throw new SandboxException(
+                        io.github.sandboxdemo.api.SandboxErrorCode.POLICY_INVALID,
+                        io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
                         "GetSecurityDescriptorControl(" + path + ") failed, Win32=" + error);
             }
             return new DaclSnapshot(

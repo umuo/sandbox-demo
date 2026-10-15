@@ -3,12 +3,15 @@ package io.github.sandboxdemo.sdk;
 import io.github.sandboxdemo.api.CommandSpec;
 import io.github.sandboxdemo.api.SandboxBackendUnavailableException;
 import io.github.sandboxdemo.api.SandboxCapabilities;
+import io.github.sandboxdemo.api.SandboxCleanupResult;
+import io.github.sandboxdemo.api.SandboxCleanupState;
 import io.github.sandboxdemo.api.SandboxErrorCode;
 import io.github.sandboxdemo.api.SandboxException;
 import io.github.sandboxdemo.api.SandboxExecution;
 import io.github.sandboxdemo.api.SandboxPhase;
 import io.github.sandboxdemo.api.SandboxPlatform;
 import io.github.sandboxdemo.api.SandboxPolicy;
+import io.github.sandboxdemo.api.SandboxPolicyReadiness;
 import io.github.sandboxdemo.api.SandboxRequest;
 import io.github.sandboxdemo.api.SandboxResult;
 import io.github.sandboxdemo.api.SandboxRunner;
@@ -80,6 +83,18 @@ public final class SandboxClient {
             context.checkActive();
             context.opaqueBackend();
             return runner.execute(required, context);
+        } catch (LinkageError unavailable) {
+            throw new SandboxException(
+                    SandboxErrorCode.BACKEND_UNAVAILABLE,
+                    SandboxPhase.PREPARATION,
+                    "native backend linkage failed",
+                    unavailable);
+        } catch (RuntimeException unexpected) {
+            throw new SandboxException(
+                    SandboxErrorCode.UNKNOWN,
+                    SandboxPhase.EXECUTION,
+                    "backend runtime failure",
+                    unexpected);
         } finally {
             if (owned) {
                 context.finishWorker();
@@ -110,12 +125,99 @@ public final class SandboxClient {
     /** 在预算提交前验证请求能力与实际策略。探针不执行目标命令；执行时仍重新预检。 */
     public void validate(SandboxRequest request) throws SandboxException, InterruptedException {
         SandboxRequest required = Objects.requireNonNull(request, "request");
-        validateCapabilities(required.policy());
-        runner.validate(required);
+        SandboxPolicyReadiness readiness = readiness(required);
+        if (readiness.error().isPresent()) {
+            throw readiness.error().get();
+        }
+    }
+
+    /**
+     * Runs only trusted probes with the requested policy; target argv/stdin/callbacks are not run.
+     */
+    public SandboxPolicyReadiness readiness(SandboxRequest request) throws InterruptedException {
+        SandboxRequest required = Objects.requireNonNull(request, "request");
+        long started = System.nanoTime();
+        ExecutionContext context = ExecutionContext.current();
+        boolean owned = context == null;
+        if (owned) {
+            context = new ExecutionContext(required.policy().timeout(), cleanupGrace);
+            context.beginWorker();
+        }
+        ExecutionContext previous = ExecutionContext.attach(context);
+        SandboxException error = null;
+        io.github.sandboxdemo.api.SandboxBackendInfo info =
+                io.github.sandboxdemo.api.SandboxBackendInfo.current(
+                        capabilities.platform(), capabilities.backendName(), null);
+        try {
+            validateCapabilities(required.policy());
+            context.checkActive();
+            context.opaqueBackend();
+            runner.validate(required);
+            context.checkActive();
+            info = Objects.requireNonNull(runner.backendInfo(), "backendInfo");
+            if (info.platform() != capabilities.platform()
+                    || !info.backendName().equals(capabilities.backendName())) {
+                throw new IllegalArgumentException("backend metadata identity mismatch");
+            }
+            context.checkActive();
+        } catch (SandboxException failure) {
+            error =
+                    (failure.phase() == SandboxPhase.EXECUTION
+                                    || failure.phase() == SandboxPhase.START
+                                    || failure.phase() == SandboxPhase.OUTPUT)
+                            ? new SandboxException(
+                                    failure.code(),
+                                    SandboxPhase.PROBE,
+                                    failure.debugMessage(),
+                                    failure)
+                            : failure;
+        } catch (LinkageError | RuntimeException failure) {
+            error =
+                    new SandboxException(
+                            SandboxErrorCode.BACKEND_UNAVAILABLE,
+                            SandboxPhase.PROBE,
+                            "readiness implementation failed",
+                            failure);
+        } finally {
+            if (owned) {
+                context.finishWorker();
+            }
+            ExecutionContext.restore(previous);
+        }
+        SandboxCleanupResult cleanup = context.cleanup();
+        if (error == null
+                && (cleanup.processes() == SandboxCleanupState.FAILED
+                        || cleanup.streams() == SandboxCleanupState.FAILED
+                        || cleanup.temporaryFiles() == SandboxCleanupState.FAILED
+                        || cleanup.hostResources() == SandboxCleanupState.FAILED)) {
+            error =
+                    new SandboxException(
+                            SandboxErrorCode.CLEANUP_FAILED,
+                            SandboxPhase.CLEANUP,
+                            "preflight cleanup failed");
+        }
+        return new SandboxPolicyReadiness(
+                capabilities,
+                info,
+                required.policy(),
+                error,
+                cleanup,
+                java.time.Instant.now(),
+                Duration.ofNanos(System.nanoTime() - started));
     }
 
     private void validateCapabilities(SandboxPolicy policy) throws SandboxException {
-        if (!runner.supportsOutputPolicy(policy)) {
+        boolean supportsOutput;
+        try {
+            supportsOutput = runner.supportsOutputPolicy(policy);
+        } catch (RuntimeException | LinkageError failure) {
+            throw new SandboxException(
+                    SandboxErrorCode.BACKEND_UNAVAILABLE,
+                    SandboxPhase.ADMISSION,
+                    "backend capability check failed",
+                    failure);
+        }
+        if (!supportsOutput) {
             throw new SandboxBackendUnavailableException(
                     SandboxErrorCode.POLICY_UNSUPPORTED,
                     SandboxPhase.ADMISSION,
@@ -168,7 +270,23 @@ public final class SandboxClient {
 
     /** Performs a non-persistent readiness probe of the configured platform runtime. */
     public SandboxRuntimeStatus status() {
-        return statusSupplier.get();
+        try {
+            return Objects.requireNonNull(statusSupplier.get(), "runtime status");
+        } catch (LinkageError | RuntimeException failure) {
+            SandboxException error =
+                    new SandboxException(
+                            SandboxErrorCode.BACKEND_UNAVAILABLE,
+                            SandboxPhase.PROBE,
+                            "runtime status provider failed",
+                            failure);
+            return new SandboxRuntimeStatus(
+                    capabilities,
+                    false,
+                    error.getMessage(),
+                    io.github.sandboxdemo.api.SandboxBackendInfo.current(
+                            capabilities.platform(), capabilities.backendName(), null),
+                    error);
+        }
     }
 
     /** Builder for SDK configuration. */

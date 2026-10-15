@@ -32,6 +32,8 @@ public final class WindowsSandboxWorker {
             String actualSid = currentUserSid();
             if (!actualSid.equalsIgnoreCase(request.expectedUserSid())) {
                 throw new SandboxException(
+                        io.github.sandboxdemo.api.SandboxErrorCode.POLICY_INVALID,
+                        io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
                         "worker identity mismatch: expected "
                                 + request.expectedUserSid()
                                 + " but was "
@@ -74,10 +76,17 @@ public final class WindowsSandboxWorker {
             WindowsWorkerProtocol.writeResult(resultFile, result, null);
         } catch (Throwable error) {
             try {
-                WindowsWorkerProtocol.writeResult(
-                        resultFile,
-                        null,
-                        error.getClass().getSimpleName() + ": " + safeMessage(error));
+                SandboxException failure =
+                        error instanceof SandboxException
+                                ? (SandboxException) error
+                                : new SandboxException(
+                                        io.github.sandboxdemo.api.SandboxErrorCode.START_FAILED,
+                                        io.github.sandboxdemo.api.SandboxPhase.START,
+                                        error.getClass().getSimpleName()
+                                                + ": "
+                                                + safeMessage(error),
+                                        error);
+                WindowsWorkerProtocol.writeFailure(resultFile, failure);
             } catch (Exception ignored) {
                 // The host reports a missing result if even this fail-closed path fails.
             }
@@ -127,6 +136,8 @@ public final class WindowsSandboxWorker {
         if (!Advapi32.INSTANCE.OpenProcessToken(
                 Kernel32.INSTANCE.GetCurrentProcess(), WinNT.TOKEN_QUERY, token)) {
             throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.POLICY_INVALID,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
                     "OpenProcessToken(worker) failed, Win32=" + Kernel32.INSTANCE.GetLastError());
         }
         try {

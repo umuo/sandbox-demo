@@ -91,6 +91,24 @@ public final class ValidatedPolicy {
         this.allowPathSearch = allowPathSearch;
     }
 
+    /**
+     * Same effective filesystem/network policy, fixed capture limits and no caller output controls.
+     */
+    public ValidatedPolicy forProbe() {
+        return new ValidatedPolicy(
+                workingDirectory,
+                readableRoots,
+                writableRoots,
+                protectedPaths,
+                privateTempDirectory,
+                networkPolicy,
+                readPolicy,
+                deletionPolicy,
+                timeout,
+                8192,
+                false);
+    }
+
     public Path workingDirectory() {
         return workingDirectory;
     }

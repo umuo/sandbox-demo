@@ -172,6 +172,8 @@ final class WindowsWorkerLauncher {
                 int error = Native.getLastError();
                 if (error == 1385) {
                     throw new SandboxException(
+                            io.github.sandboxdemo.api.SandboxErrorCode.START_FAILED,
+                            io.github.sandboxdemo.api.SandboxPhase.START,
                             "CreateProcessWithLogonW(worker) failed, Win32=1385: Windows has not "
                                     + "granted 'Log on locally' to the sandbox account "
                                     + credential.username()
@@ -209,6 +211,8 @@ final class WindowsWorkerLauncher {
             }
             if (!java.nio.file.Files.isRegularFile(session.resultFile())) {
                 throw new SandboxException(
+                        io.github.sandboxdemo.api.SandboxErrorCode.START_FAILED,
+                        io.github.sandboxdemo.api.SandboxPhase.START,
                         "Windows sandbox worker exited "
                                 + exitCode.getValue()
                                 + " without a result file");
@@ -333,7 +337,10 @@ final class WindowsWorkerLauncher {
     }
 
     private static SandboxException win32(String operation, int error) {
-        return new SandboxException(operation + " failed, Win32=" + error);
+        return new SandboxException(
+                io.github.sandboxdemo.api.SandboxErrorCode.START_FAILED,
+                io.github.sandboxdemo.api.SandboxPhase.START,
+                operation + " failed, Win32=" + error);
     }
 
     private static void close(Pointer handle) {

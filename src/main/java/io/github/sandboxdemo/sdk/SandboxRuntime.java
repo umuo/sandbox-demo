@@ -165,34 +165,88 @@ public final class SandboxRuntime {
                         }
                         WindowsSandboxSetup.verify(windowsHome);
                         return new SandboxRuntimeStatus(
-                                capabilities, true, "Windows production runtime verified");
+                                capabilities,
+                                true,
+                                "Windows production runtime verified",
+                                runtimeInfo(platform, backendName, windowsHome),
+                                null);
                     }
                     return new SandboxRuntimeStatus(
-                            capabilities, true, WindowsRestrictedTokenSandboxRunner.probeBackend());
+                            capabilities,
+                            true,
+                            WindowsRestrictedTokenSandboxRunner.probeBackend(),
+                            runtimeInfo(platform, backendName, windowsHome),
+                            null);
                 case LINUX:
                     return new SandboxRuntimeStatus(
-                            capabilities, true, LinuxBubblewrapSandboxRunner.probeBackend());
+                            capabilities,
+                            true,
+                            LinuxBubblewrapSandboxRunner.probeBackend(),
+                            runtimeInfo(platform, backendName, windowsHome),
+                            null);
                 case MACOS:
                     return new SandboxRuntimeStatus(
-                            capabilities, true, MacOsSeatbeltSandboxRunner.probeBackend());
+                            capabilities,
+                            true,
+                            MacOsSeatbeltSandboxRunner.probeBackend(),
+                            runtimeInfo(platform, backendName, windowsHome),
+                            null);
                 default:
                     throw new IllegalStateException("unsupported platform: " + platform);
             }
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
-            return new SandboxRuntimeStatus(capabilities, false, "readiness check interrupted");
-        } catch (Exception error) {
-            String message =
-                    error instanceof SandboxException
-                            ? error.getMessage()
-                            : "Sandbox readiness failed";
-            return new SandboxRuntimeStatus(
+            return failedStatus(
                     capabilities,
-                    false,
-                    message == null || io.github.sandboxdemo.core.Java8.isBlank(message)
-                            ? error.getClass().getSimpleName()
-                            : message);
+                    platform,
+                    backendName,
+                    windowsHome,
+                    new SandboxException(
+                            io.github.sandboxdemo.api.SandboxErrorCode.CANCELLED,
+                            io.github.sandboxdemo.api.SandboxPhase.PROBE,
+                            "readiness check interrupted",
+                            interrupted));
+        } catch (LinkageError | Exception error) {
+            SandboxException failure =
+                    error instanceof SandboxException
+                            ? (SandboxException) error
+                            : new SandboxException(
+                                    io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                                    io.github.sandboxdemo.api.SandboxPhase.PROBE,
+                                    "runtime readiness failed",
+                                    error);
+            return failedStatus(capabilities, platform, backendName, windowsHome, failure);
         }
+    }
+
+    private static SandboxRuntimeStatus failedStatus(
+            SandboxCapabilities capabilities,
+            SandboxPlatform platform,
+            String name,
+            Path home,
+            SandboxException failure) {
+        return new SandboxRuntimeStatus(
+                capabilities,
+                false,
+                failure.getMessage(),
+                runtimeInfo(platform, name, home),
+                failure);
+    }
+
+    private static io.github.sandboxdemo.api.SandboxBackendInfo runtimeInfo(
+            SandboxPlatform platform, String name, Path home) {
+        if (platform == SandboxPlatform.MACOS) {
+            return new MacOsSeatbeltSandboxRunner().backendInfo();
+        }
+        if (platform == SandboxPlatform.WINDOWS) {
+            if ("windows-dedicated-user-restricted-token".equals(name)) {
+                return new io.github.sandboxdemo.platform.windows.WindowsProductionSandboxRunner(
+                                home == null ? WindowsSandboxSetup.defaultHome() : home)
+                        .backendInfo();
+            }
+            return new WindowsRestrictedTokenSandboxRunner().backendInfo();
+        }
+        return io.github.sandboxdemo.api.SandboxBackendInfo.current(platform, name, null);
     }
 
     private static String defaultBackendName(SandboxPlatform platform) {

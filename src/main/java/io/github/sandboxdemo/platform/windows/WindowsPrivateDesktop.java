@@ -172,7 +172,10 @@ final class WindowsPrivateDesktop implements AutoCloseable {
             }
             securityDescriptor = descriptor.getValue();
             if (oldDacl.getValue() == null) {
-                throw new SandboxException("refusing to mutate a window station with a NULL DACL");
+                throw new SandboxException(
+                        io.github.sandboxdemo.api.SandboxErrorCode.START_FAILED,
+                        io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                        "refusing to mutate a window station with a NULL DACL");
             }
 
             WindowsNative.EXPLICIT_ACCESS entry = new WindowsNative.EXPLICIT_ACCESS();
@@ -290,10 +293,16 @@ final class WindowsPrivateDesktop implements AutoCloseable {
     }
 
     private static SandboxException win32(String operation) {
-        return new SandboxException(operation + " failed, Win32=" + Native.getLastError());
+        return new SandboxException(
+                io.github.sandboxdemo.api.SandboxErrorCode.START_FAILED,
+                io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                operation + " failed, Win32=" + Native.getLastError());
     }
 
     private static SandboxException windowsError(String operation, int error) {
-        return new SandboxException(operation + " failed, Win32=" + error);
+        return new SandboxException(
+                io.github.sandboxdemo.api.SandboxErrorCode.START_FAILED,
+                io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                operation + " failed, Win32=" + error);
     }
 }

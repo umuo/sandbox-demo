@@ -47,7 +47,11 @@ final class WindowsSandboxSession implements AutoCloseable {
             session.grantWorker(sandboxUserSid);
             return session;
         } catch (IOException e) {
-            throw new SandboxException("failed to create Windows sandbox session directory", e);
+            throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.POLICY_INVALID,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                    "failed to create Windows sandbox session directory",
+                    e);
         }
     }
 
@@ -89,6 +93,8 @@ final class WindowsSandboxSession implements AutoCloseable {
                         null);
         if (sealedRequestHandle == null || Pointer.nativeValue(sealedRequestHandle) == -1L) {
             throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.POLICY_INVALID,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
                     "failed to lock sealed Windows worker request, Win32=" + Native.getLastError());
         }
     }
@@ -113,6 +119,8 @@ final class WindowsSandboxSession implements AutoCloseable {
             int exitCode = process.waitFor();
             if (exitCode != 0) {
                 throw new SandboxException(
+                        io.github.sandboxdemo.api.SandboxErrorCode.POLICY_INVALID,
+                        io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
                         "failed to "
                                 + operation
                                 + " (exit="
@@ -121,7 +129,11 @@ final class WindowsSandboxSession implements AutoCloseable {
                                 + new String(output, StandardCharsets.UTF_8).trim());
             }
         } catch (IOException e) {
-            throw new SandboxException("failed to launch icacls.exe to " + operation, e);
+            throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.POLICY_INVALID,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                    "failed to launch icacls.exe to " + operation,
+                    e);
         }
     }
 

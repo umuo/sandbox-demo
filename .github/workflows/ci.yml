@@ -37,6 +37,7 @@ jobs:
       SANDBOX_RUN_PLATFORM_INTEGRATION: '1'
       SANDBOX_RUN_LIFECYCLE_INTEGRATION: '1'
       SANDBOX_RUN_OUTPUT_INTEGRATION: '1'
+      SANDBOX_RUN_READINESS_INTEGRATION: '1'
       # Modern macOS admission failures are failures, never successful skips.
       SANDBOX_MACOS_STRICT_ACCEPTANCE: ${{ startsWith(matrix.os, 'macos-') && matrix.java != '8' && '1' || '0' }}
     steps:
@@ -79,12 +80,22 @@ jobs:
           }
       - name: Compile external SDK consumer
         run: mvn --batch-mode --no-transfer-progress -f examples/sdk-consumer/pom.xml clean package
+      - uses: actions/setup-python@v6
+        if: always()
+        with:
+          python-version: '3.12'
+      - name: Summarize runtime versions and test counts
+        if: always()
+        run: python .github/scripts/collect-test-evidence.py
       - name: Upload test evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: test-evidence-${{ matrix.os }}-jdk-${{ matrix.java }}
-          path: target/surefire-reports/
+          path: |
+            target/surefire-reports/
+            target/backend-evidence/
+            target/test-evidence.json
       - name: Uninstall production Windows sandbox
         if: runner.os == 'Windows' && always()
         shell: pwsh

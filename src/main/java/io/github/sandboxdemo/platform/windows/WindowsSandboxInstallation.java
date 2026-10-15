@@ -51,6 +51,8 @@ final class WindowsSandboxInstallation {
         Path file = home.toAbsolutePath().normalize().resolve(FILE_NAME);
         if (!Files.isRegularFile(file)) {
             throw new SandboxBackendUnavailableException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
                     "the production Windows sandbox is not installed; run `setup-windows --home "
                             + home.toAbsolutePath().normalize()
                             + "` from an elevated terminal");
@@ -59,16 +61,26 @@ final class WindowsSandboxInstallation {
         try (InputStream input = Files.newInputStream(file)) {
             values.load(input);
         } catch (IOException e) {
-            throw new SandboxException("failed to read Windows sandbox installation metadata", e);
+            throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                    "failed to read Windows sandbox installation metadata",
+                    e);
         }
         int version;
         try {
             version = Integer.parseInt(required(values, "version"));
         } catch (NumberFormatException e) {
-            throw new SandboxException("invalid Windows sandbox installation version", e);
+            throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                    "invalid Windows sandbox installation version",
+                    e);
         }
         if (version != VERSION) {
             throw new SandboxBackendUnavailableException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
                     "Windows sandbox installation version "
                             + version
                             + " is incompatible with runtime version "
@@ -99,7 +111,11 @@ final class WindowsSandboxInstallation {
                     StandardCopyOption.ATOMIC_MOVE,
                     StandardCopyOption.REPLACE_EXISTING);
         } catch (IOException e) {
-            throw new SandboxException("failed to save Windows sandbox installation metadata", e);
+            throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                    "failed to save Windows sandbox installation metadata",
+                    e);
         }
     }
 
@@ -129,6 +145,8 @@ final class WindowsSandboxInstallation {
             String actualSid = Advapi32Util.getAccountByName(null, credential.username()).sidString;
             if (!actualSid.equalsIgnoreCase(credential.sid())) {
                 throw new SandboxException(
+                        io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                        io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
                         "Windows sandbox account SID changed; rerun uninstall/setup: "
                                 + credential.username());
             }
@@ -136,7 +154,10 @@ final class WindowsSandboxInstallation {
             throw e;
         } catch (RuntimeException e) {
             throw new SandboxException(
-                    "Windows sandbox account is missing: " + credential.username(), e);
+                    io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                    "Windows sandbox account is missing: " + credential.username(),
+                    e);
         }
     }
 
@@ -147,6 +168,8 @@ final class WindowsSandboxInstallation {
             plaintext = Crypt32Util.cryptUnprotectData(Base64.getDecoder().decode(encrypted));
         } catch (RuntimeException e) {
             throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
                     "failed to decrypt "
                             + prefix
                             + " sandbox credentials; setup and run must use the same Windows user",
@@ -173,7 +196,10 @@ final class WindowsSandboxInstallation {
     private static String required(Properties values, String name) throws SandboxException {
         String value = values.getProperty(name);
         if (value == null || io.github.sandboxdemo.core.Java8.isBlank(value)) {
-            throw new SandboxException("missing Windows sandbox installation value: " + name);
+            throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                    "missing Windows sandbox installation value: " + name);
         }
         return value;
     }

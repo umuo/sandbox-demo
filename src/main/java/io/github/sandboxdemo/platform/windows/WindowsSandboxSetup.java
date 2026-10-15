@@ -57,7 +57,10 @@ public final class WindowsSandboxSetup {
      */
     public static void verify(Path home) throws SandboxException, InterruptedException {
         if (OperatingSystem.current() != OperatingSystem.WINDOWS) {
-            throw new SandboxException("Windows sandbox verification can run only on Windows");
+            throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                    "Windows sandbox verification can run only on Windows");
         }
         WindowsSandboxInstallation installation =
                 WindowsSandboxInstallation.load(home.toAbsolutePath().normalize());
@@ -83,7 +86,11 @@ public final class WindowsSandboxSetup {
             try {
                 cleanupKnownTree(normalizedHome.resolve("sessions"));
             } catch (IOException e) {
-                throw new SandboxException("failed to clean abandoned Windows sessions", e);
+                throw new SandboxException(
+                        io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                        io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                        "failed to clean abandoned Windows sessions",
+                        e);
             }
             installWorkerRuntime(existing);
             hideSandboxUsers();
@@ -164,7 +171,11 @@ public final class WindowsSandboxSetup {
             if (e instanceof SandboxException) {
                 throw (SandboxException) e;
             }
-            throw new SandboxException("failed to install the Windows sandbox", e);
+            throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                    "failed to install the Windows sandbox",
+                    e);
         }
     }
 
@@ -174,6 +185,8 @@ public final class WindowsSandboxSetup {
         Path marker = normalizedHome.resolve("windows-sandbox.properties");
         if (!Files.isRegularFile(marker)) {
             throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
                     "refusing to uninstall without matching installation metadata: " + marker);
         }
         WindowsSandboxInstallation installation = WindowsSandboxInstallation.load(normalizedHome);
@@ -194,28 +207,42 @@ public final class WindowsSandboxSetup {
                 // Never remove caller-owned files from a configured home.
             }
         } catch (IOException e) {
-            throw new SandboxException("failed to remove Windows sandbox metadata: " + marker, e);
+            throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                    "failed to remove Windows sandbox metadata: " + marker,
+                    e);
         }
     }
 
     private static void validateInstallationHome(Path home, Path marker) throws SandboxException {
         if (home.getParent() == null) {
-            throw new SandboxException("Windows sandbox home must not be a volume root: " + home);
+            throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                    "Windows sandbox home must not be a volume root: " + home);
         }
         try {
             if (Files.exists(home)) {
                 Path real = home.toRealPath();
                 if (!real.toString().equalsIgnoreCase(home.toString())) {
                     throw new SandboxException(
+                            io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                            io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
                             "Windows sandbox home must not traverse a link or junction: " + home);
                 }
                 if (!Files.isDirectory(home)) {
-                    throw new SandboxException("Windows sandbox home is not a directory: " + home);
+                    throw new SandboxException(
+                            io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                            io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                            "Windows sandbox home is not a directory: " + home);
                 }
                 if (!Files.exists(marker)) {
                     try (java.util.stream.Stream<Path> entries = Files.list(home)) {
                         if (entries.findAny().isPresent()) {
                             throw new SandboxException(
+                                    io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
                                     "refusing to take ownership of a non-empty directory without "
                                             + "sandbox metadata: "
                                             + home);
@@ -226,12 +253,18 @@ public final class WindowsSandboxSetup {
                 Path parent = home.getParent().toRealPath();
                 if (!parent.toString().equalsIgnoreCase(home.getParent().toString())) {
                     throw new SandboxException(
+                            io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                            io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
                             "Windows sandbox home parent must not traverse a link or junction: "
                                     + home.getParent());
                 }
             }
         } catch (IOException e) {
-            throw new SandboxException("failed to validate Windows sandbox home: " + home, e);
+            throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                    "failed to validate Windows sandbox home: " + home,
+                    e);
         }
     }
 
@@ -250,10 +283,15 @@ public final class WindowsSandboxSetup {
 
     private static void requireWindowsAndElevation() throws SandboxException {
         if (OperatingSystem.current() != OperatingSystem.WINDOWS) {
-            throw new SandboxException("Windows sandbox setup can run only on Windows");
+            throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                    "Windows sandbox setup can run only on Windows");
         }
         if (!Advapi32Util.isCurrentProcessElevated()) {
             throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
                     "Windows sandbox setup requires an elevated Administrator terminal");
         }
     }
@@ -270,12 +308,16 @@ public final class WindowsSandboxSetup {
         int result = Netapi32.INSTANCE.NetUserAdd(null, 1, user, parameterError);
         if (result == NERR_USER_EXISTS) {
             throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
                     "local sandbox user already exists without matching installation metadata: "
                             + username
                             + "; remove it explicitly before setup");
         }
         if (result != NERR_SUCCESS) {
             throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
                     "NetUserAdd("
                             + username
                             + ") failed, status="
@@ -288,7 +330,10 @@ public final class WindowsSandboxSetup {
     private static void deleteUserIfPresent(String username) throws SandboxException {
         int result = Netapi32.INSTANCE.NetUserDel(null, username);
         if (result != NERR_SUCCESS && result != 2221) {
-            throw new SandboxException("NetUserDel(" + username + ") failed, status=" + result);
+            throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                    "NetUserDel(" + username + ") failed, status=" + result);
         }
     }
 
@@ -296,7 +341,11 @@ public final class WindowsSandboxSetup {
         try {
             return Advapi32Util.getAccountByName(null, username).sidString;
         } catch (RuntimeException e) {
-            throw new SandboxException("failed to resolve SID for local user: " + username, e);
+            throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                    "failed to resolve SID for local user: " + username,
+                    e);
         }
     }
 
@@ -312,6 +361,8 @@ public final class WindowsSandboxSetup {
         if (!WindowsNative.Advapi32.INSTANCE.ConvertStringSidToSidW(
                 new com.sun.jna.WString(credential.sid()), sid)) {
             throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
                     "ConvertStringSidToSidW("
                             + credential.username()
                             + ") failed, Win32="
@@ -352,7 +403,10 @@ public final class WindowsSandboxSetup {
     private static void checkLsaStatus(int status, String operation) throws SandboxException {
         if (status != 0) {
             int win32 = WindowsNative.Advapi32.INSTANCE.LsaNtStatusToWinError(status);
-            throw new SandboxException(operation + " failed, Win32=" + win32);
+            throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                    operation + " failed, Win32=" + win32);
         }
     }
 
@@ -369,12 +423,16 @@ public final class WindowsSandboxSetup {
             int error = Kernel32.INSTANCE.GetLastError();
             if (error == 1385) {
                 throw new SandboxException(
+                        io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                        io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
                         "interactive logon verification failed for "
                                 + credential.username()
                                 + ", Win32=1385: grant 'Log on locally' and remove any applicable "
                                 + "'Deny log on locally' local or domain policy");
             }
             throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
                     "interactive logon verification failed for "
                             + credential.username()
                             + ", Win32="
@@ -388,6 +446,8 @@ public final class WindowsSandboxSetup {
         if (!Advapi32.INSTANCE.OpenProcessToken(
                 Kernel32.INSTANCE.GetCurrentProcess(), WinNT.TOKEN_QUERY, token)) {
             throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
                     "OpenProcessToken(setup) failed, Win32=" + Kernel32.INSTANCE.GetLastError());
         }
         try {
@@ -417,13 +477,19 @@ public final class WindowsSandboxSetup {
             int exitCode = process.waitFor();
             if (exitCode != 0) {
                 throw new SandboxException(
+                        io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                        io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
                         "failed to protect Windows sandbox metadata (exit="
                                 + exitCode
                                 + "): "
                                 + new String(output, StandardCharsets.UTF_8).trim());
             }
         } catch (IOException e) {
-            throw new SandboxException("failed to launch icacls.exe for sandbox metadata", e);
+            throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                    "failed to launch icacls.exe for sandbox metadata",
+                    e);
         }
     }
 
@@ -447,7 +513,11 @@ public final class WindowsSandboxSetup {
                     WindowsSandboxInstallation.DEFAULT_ONLINE_USER,
                     0);
         } catch (RuntimeException e) {
-            throw new SandboxException("failed to hide Windows sandbox users from sign-in UI", e);
+            throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                    "failed to hide Windows sandbox users from sign-in UI",
+                    e);
         }
     }
 
@@ -492,7 +562,11 @@ public final class WindowsSandboxSetup {
             moveAtomically(manifestTemporary, manifest);
             cleanupObsoleteRuntimeFiles(runtimeDirectory, installedNames);
         } catch (IOException e) {
-            throw new SandboxException("failed to install the Windows sandbox worker JARs", e);
+            throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                    "failed to install the Windows sandbox worker JARs",
+                    e);
         }
         WindowsWorkerRuntime.verifyInstalled(installation);
         grantRuntimeRead(
@@ -611,6 +685,8 @@ public final class WindowsSandboxSetup {
             int exitCode = process.waitFor();
             if (exitCode != 0) {
                 throw new SandboxException(
+                        io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                        io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
                         "failed to "
                                 + operation
                                 + " (exit="
@@ -619,7 +695,11 @@ public final class WindowsSandboxSetup {
                                 + new String(output, StandardCharsets.UTF_8).trim());
             }
         } catch (IOException e) {
-            throw new SandboxException("failed to launch icacls.exe to " + operation, e);
+            throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                    "failed to launch icacls.exe to " + operation,
+                    e);
         }
     }
 }

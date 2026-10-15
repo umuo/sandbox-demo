@@ -118,3 +118,17 @@ Windows 两种 launcher 使用同一捕获器；worker 协议 v5 传输配置及
 宿主 macOS 15.5 (24F74) arm64，系统 Seatbelt。实际 Zulu JDK 8u282 `verify`：103 项，0 失败、0 错误、25 跳过；Zulu 17.0.11 与 Zulu 21.0.4 启用全部 macOS 原生测试：各 103 项，0 失败、0 错误、14 跳过（Linux/Windows 原生用例）。Java 8 新增输出原生测试单独执行 2 项，0 失败、0 错误、0 跳过。七个消费示例在实际 JDK 8 与 JDK 17/21 的 Java 8 编译模式下通过；新示例在 JDK 8 运行得到 OUTPUT_LIMIT、stdoutBytes=64、macOS processes UNKNOWN，拒绝输出交付。严格文档构建通过。
 
 本机没有执行 Linux/Windows 新阶段原生验收，须由本阶段对应远端 Actions 验证；不把先前阶段的通过当作本阶段证据。Windows CI 新增聚合额度/受限回调和阻塞父进程回调两项原生用例。默认受限 token 在管理员 CI 宿主仍遵循原拒绝/跳过边界，未通过放宽权限来执行。协议 v5 只用于同版本可信 worker，未发布新 Central 制品。
+
+## SDK-04/05：策略准入证据与稳定错误（2026-10-15）
+
+新增 `SandboxPolicyReadiness` 与 `SandboxBackendInfo`，保留 `validate` 和旧 DTO 构造器。Linux/macOS、Windows 默认及专用账户后端的实际策略预检运行固定可信探针，不运行目标 argv/stdin/回调，不接受调用方加载器环境。默认 Windows 严格策略仍在准入阶段拒绝。返回版本、检查时间、能力、错误码/阶段与独立回收证据；未知版本不猜测，UNKNOWN 回收不包装成成功。
+
+内建 Windows 准备、启动、捕获、部署、清理路径补齐结构化错误；worker 协议 v6 传递错误码/阶段并拒绝旧版本和无效枚举。默认异常和 DTO 字符串不含诊断原文，详细信息保留显式调试入口。专用账户 worker 需重新供应同版本运行时，未发布新 Central 制品。
+
+本机 macOS 15.5 arm64：实际 Zulu JDK 8u282 完整 `verify` 118 项，0 失败、0 错误、29 跳过；JDK 21.0.4 全部 macOS 原生测试 118 项，0 失败、0 错误、16 跳过。JDK 17.0.11 在新增最后一项默认错误脱敏单元测试之前运行 117 项，0 失败、0 错误、16 跳过。JDK 8 单独运行新增预检原生用例 2 项，全通过，无跳过。跳过主要是其他平台或未启用的原生用例，不算通过。
+
+CI 新增 `target/test-evidence.json` 与 Step Summary，汇总实际执行/失败/错误/跳过数、OS/JDK 和真实探针后端版本；不采集请求或诊断正文。SDK 源码测试无 manifest 时版本显式 UNKNOWN。远端本阶段结果待对应提交的 Actions 验证，本机没有执行 Linux/Windows 原生验收。SDK-03 对应提交 `2969be3` 的 [Actions](https://github.com/umuo/sandbox-demo/actions/runs/38525418261) 已确认 11 个平台/JDK 任务及文档构建通过。
+
+同步预检不能硬中断卡住的宿主准备操作，不是动态依赖完整验证、持久授权或完整回收保证。macOS processes UNKNOWN、Windows hostResources UNKNOWN 边界保留；SDK-06 目标严格环境与 SDK-07 硬资源准入尚未实现。
+
+本阶段八个外部消费示例在实际 JDK 8 和 JDK 17/21 的 Java 8 编译模式下通过；JDK 8 运行 `SandboxReadinessExample` 得到 ready=true，目标 marker 未生成，macOS processes UNKNOWN、其他回收维度 CONFIRMED。严格文档构建通过。

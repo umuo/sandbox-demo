@@ -37,6 +37,11 @@ final class WindowsPathLease implements AutoCloseable {
 
     static WindowsPathLease acquire(ValidatedPolicy policy, Path executable)
             throws SandboxException {
+        return acquire(policy, io.github.sandboxdemo.core.Java8.listOf(executable));
+    }
+
+    static WindowsPathLease acquire(ValidatedPolicy policy, List<Path> executables)
+            throws SandboxException {
         List<Path> protectedObjects = new ArrayList<>();
         protectedObjects.add(policy.workingDirectory());
         protectedObjects.addAll(policy.readableRoots());
@@ -54,9 +59,12 @@ final class WindowsPathLease implements AutoCloseable {
                 rejectReparseComponents(path);
                 handles.add(openWithoutDeleteSharing(path));
             }
-            rejectRemoteOrNonNtfs(executable);
-            rejectReparseComponents(executable);
-            handles.add(openWithoutWriteOrDeleteSharing(executable));
+            for (Path executable :
+                    executables.stream().distinct().collect(java.util.stream.Collectors.toList())) {
+                rejectRemoteOrNonNtfs(executable);
+                rejectReparseComponents(executable);
+                handles.add(openWithoutWriteOrDeleteSharing(executable));
+            }
             return new WindowsPathLease(handles);
         } catch (SandboxException e) {
             closeAll(handles);
@@ -67,16 +75,24 @@ final class WindowsPathLease implements AutoCloseable {
     private static void rejectRemoteOrNonNtfs(Path path) throws SandboxException {
         if (path.toString().startsWith("\\\\")) {
             throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.POLICY_INVALID,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
                     "UNC paths are not accepted by the Windows sandbox: " + path);
         }
         try {
             String type = Files.getFileStore(path).type();
             if (!"NTFS".equalsIgnoreCase(type)) {
                 throw new SandboxException(
+                        io.github.sandboxdemo.api.SandboxErrorCode.POLICY_INVALID,
+                        io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
                         "Windows sandbox paths must reside on NTFS; " + path + " uses " + type);
             }
         } catch (IOException e) {
-            throw new SandboxException("failed to inspect the Windows filesystem for: " + path, e);
+            throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.POLICY_INVALID,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                    "failed to inspect the Windows filesystem for: " + path,
+                    e);
         }
     }
 
@@ -84,7 +100,10 @@ final class WindowsPathLease implements AutoCloseable {
         Path absolute = path.toAbsolutePath().normalize();
         Path current = absolute.getRoot();
         if (current == null) {
-            throw new SandboxException("path has no Windows volume root: " + path);
+            throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.POLICY_INVALID,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                    "path has no Windows volume root: " + path);
         }
         for (Path component : absolute) {
             current = current.resolve(component);
@@ -94,6 +113,8 @@ final class WindowsPathLease implements AutoCloseable {
             }
             if ((attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
                 throw new SandboxException(
+                        io.github.sandboxdemo.api.SandboxErrorCode.POLICY_INVALID,
+                        io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
                         "Windows sandbox path contains a reparse point: " + current);
             }
         }
@@ -124,7 +145,10 @@ final class WindowsPathLease implements AutoCloseable {
     }
 
     private static SandboxException win32(String operation) {
-        return new SandboxException(operation + " failed, Win32=" + Native.getLastError());
+        return new SandboxException(
+                io.github.sandboxdemo.api.SandboxErrorCode.POLICY_INVALID,
+                io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                operation + " failed, Win32=" + Native.getLastError());
     }
 
     private static void closeAll(List<Pointer> handles) {

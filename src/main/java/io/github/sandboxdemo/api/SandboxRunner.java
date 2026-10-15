@@ -5,6 +5,13 @@ public interface SandboxRunner {
 
     String backendName();
 
+    /**
+     * Old/custom backends report unknown native version unless they explicitly provide evidence.
+     */
+    default SandboxBackendInfo backendInfo() {
+        return SandboxBackendInfo.current(SandboxPlatform.current(), backendName(), null);
+    }
+
     /** Legacy backends accept legacy output defaults; new options must be explicitly supported. */
     default boolean supportsOutputPolicy(SandboxPolicy policy) {
         return policy.onOutputLimit() == OutputLimitAction.TRUNCATE

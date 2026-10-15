@@ -2,6 +2,7 @@ package io.github.sandboxdemo.platform.windows;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -87,7 +88,7 @@ class WindowsWorkerProtocolTest {
             assertEquals(result.stderrTruncated(), decodedResult.stderrTruncated());
             assertEquals(result, decodedResult);
             byte[] staleRequest = Files.readAllBytes(requestFile);
-            java.nio.ByteBuffer.wrap(staleRequest).putInt(4, 4);
+            java.nio.ByteBuffer.wrap(staleRequest).putInt(4, WindowsWorkerProtocol.VERSION - 1);
             Files.write(requestFile, staleRequest);
             assertThrows(
                     SandboxException.class, () -> WindowsWorkerProtocol.readRequest(requestFile));
@@ -107,5 +108,48 @@ class WindowsWorkerProtocolTest {
 
         assertTrue(error.debugMessage().startsWith("failed to read Windows worker request ("));
         assertTrue(error.debugCause() instanceof java.io.IOException);
+    }
+
+    @Test
+    void structuredWorkerErrorsPreserveCodesAndPhasesWithoutDefaultDiagnostics() throws Exception {
+        Path file = root.resolve("failure.bin");
+        String marker = "synthetic-secret-worker";
+        for (io.github.sandboxdemo.api.SandboxErrorCode code :
+                io.github.sandboxdemo.api.SandboxErrorCode.values()) {
+            SandboxException original =
+                    new SandboxException(
+                            code, io.github.sandboxdemo.api.SandboxPhase.OUTPUT, marker);
+            WindowsWorkerProtocol.writeFailure(file, original);
+            SandboxException decoded =
+                    assertThrows(
+                            SandboxException.class, () -> WindowsWorkerProtocol.readResult(file));
+            assertEquals(code, decoded.code());
+            assertEquals(original.phase(), decoded.phase());
+            assertEquals(marker, decoded.debugMessage());
+            assertFalse(decoded.toString().contains(marker));
+            assertEquals(null, decoded.getCause());
+        }
+    }
+
+    @Test
+    void malformedWorkerErrorCodeFailsClosed() throws Exception {
+        Path file = root.resolve("invalid-failure.bin");
+        WindowsWorkerProtocol.writeFailure(
+                file,
+                new SandboxException(
+                        io.github.sandboxdemo.api.SandboxErrorCode.POLICY_INVALID,
+                        io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                        "diagnostic"));
+        String binary =
+                new String(Files.readAllBytes(file), java.nio.charset.StandardCharsets.ISO_8859_1);
+        Files.write(
+                file,
+                binary.replace("POLICY_INVALID", "INVALID_POLICY")
+                        .getBytes(java.nio.charset.StandardCharsets.ISO_8859_1));
+        SandboxException failure =
+                assertThrows(SandboxException.class, () -> WindowsWorkerProtocol.readResult(file));
+        assertEquals(
+                io.github.sandboxdemo.api.SandboxErrorCode.OUTPUT_CAPTURE_FAILED, failure.code());
+        assertEquals(io.github.sandboxdemo.api.SandboxPhase.OUTPUT, failure.phase());
     }
 }

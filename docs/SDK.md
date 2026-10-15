@@ -191,7 +191,7 @@ SandboxRequest request = SandboxRequest.builder(workspace, "/bin/sh")
 
 这两种回调都是观察接口，不能作为受治理的最终内容交付。受控调用方应不注册回调，等待完整成功及回收确认，再严格解码并治理最终字节；失败结果中的字节仅供显式诊断，不能把截断前缀交付为完整答案。输出额度不是 CPU、内存、PID 或磁盘硬限额。
 
-内建 Linux/macOS 和两个 Windows 后端支持这些选项。旧自定义 runner 通过新增默认方法 `supportsOutputPolicy` 只接受旧默认值；新配置在目标启动前拒绝。扩展后端必须显式声明并实现对应保证。Windows 内部 worker 文件协议升级为 v5，携带输出策略和终止标记；已安装的专用账户 worker 必须用同版本 SDK 重新供应运行时，旧协议明确拒绝，不能静默忽略新配置。消费示例见 `examples/sdk-consumer/src/main/java/example/SandboxOutputLimitExample.java`。
+内建 Linux/macOS 和两个 Windows 后端支持这些选项。旧自定义 runner 通过新增默认方法 `supportsOutputPolicy` 只接受旧默认值；新配置在目标启动前拒绝。扩展后端必须显式声明并实现对应保证。Windows 内部 worker 文件协议升级为 v6，携带输出策略和终止标记；已安装的专用账户 worker 必须用同版本 SDK 重新供应运行时，旧协议明确拒绝，不能静默忽略新配置。消费示例见 `examples/sdk-consumer/src/main/java/example/SandboxOutputLimitExample.java`。
 
 ## 中断、超时与实时流式输出
 
@@ -284,13 +284,33 @@ client.validate(request);
 SandboxResult result = client.execute(request);
 ```
 
-`validate` 先检查静态策略兼容性，再调用后端可信探针，不运行目标命令、不调用请求的输出监听器。当前 macOS 后端实现了此接口；Linux、Windows 和未实现该方法的旧自定义 runner 明确返回 `POLICY_UNSUPPORTED / PROBE`，不会把基础 readiness 冒充策略预检。
+`validate(request)` 现在委托 `readiness(request)`；失败时抛出其中的结构化异常。四个内建后端均实现实际策略探针；旧自定义 runner 未实现时返回 `POLICY_UNSUPPORTED / PROBE`。静态能力不满足的请求在探针启动前拒绝。
 
-macOS 探针使用实际 profile、工作目录、环境和私有临时目录，创建后删除固定 marker。执行时仍重新预检。预检通过不代表任意目标程序的全部动态依赖已验证，也不能消除预检与执行之间的文件系统竞态。程序必须位于平台运行时根或宿主声明的可读根；JDK 安装目录需由宿主显式声明。
+```java
+SandboxPolicyReadiness check = client.readiness(request);
+System.out.println(check); // 状态、错误码、耗时与回收证据，不含请求正文。
+if (!check.ready()) {
+    throw check.error().get();
+}
+// 版本信息需显式读取，缺失表示未知，不能猜测版本。
+String version = check.backendInfo().backendVersion().orElse("UNKNOWN");
+```
+
+`capabilities()` 描述机制；`status()` 检查部署环境；`readiness(request)` 检查本次路径和策略；`cleanup()` 独立描述探针资源回收。`ready()` 不要求所有资源都已确认：macOS processes 和 Windows hostResources 仍可能 UNKNOWN。宿主要求全面回收时必须另行拒绝 UNKNOWN/FAILED。
+
+Linux 探针实际进入 bubblewrap namespace、mount 和 seccomp 策略；macOS 使用请求的 Seatbelt profile；Windows 使用同一 token/Job 或专用账户 worker/ACL 准备路径。Windows 默认仍拒绝严格读取和网络拒绝，不会自动改成 HOST/ALLOW。探针仅运行 SDK 固定可信程序，不执行请求 argv/stdin，不调用监听器。探针使用独立受控环境，不接受调用方 PATH、shell 启动脚本或加载器注入变量；这不等于已经实现 SDK-06 的目标进程严格环境。
+
+探针会准备临时目录；Windows 可能暂时调整 ACL、创建会话资源。它验证可执行路径的可见性，但不证明目标的全部动态依赖可用，也不消除预检与执行之间的竞态。执行仍重新实施策略；预检结果不能作为可缓存授权令牌。程序必须位于平台运行时根或宿主声明的可读根，JDK 安装目录需显式声明。
+
+`SandboxBackendInfo` 提供后端、OS、架构、JDK、SDK 版本。Seatbelt 以系统版本标识；Windows 标明 JNA/worker 协议；Linux 优先从同一隔离探针读取 bwrap 版本，无法取得则为空。源码测试没有制品 manifest 时 SDK 版本为空。默认字符串不输出原始版本字段，显式 getter 供宿主选择审计字段。
+
+预检使用同一绝对期限和清理宽限，但此入口是同步调用，不能强行中断卡住的宿主文件系统、原生准备或自定义后端。宿主应在有限工作池中调度，不能把请求 timeout 当作所有宿主操作的硬时限。消费示例见 `examples/sdk-consumer/src/main/java/example/SandboxReadinessExample.java`。
 
 ### 错误分类与诊断
 
-使用 `SandboxException.code()` 和 `phase()` 映射错误，不再匹配 `getMessage()`。当前已分类的入口包括：策略不支持、路径准备失败、可执行文件解析失败、共享进程启动失败、输出捕获失败和 macOS profile 探针失败。旧构造器、尚未迁移的内部错误及自定义后端保守返回 `UNKNOWN`；`OUTPUT_LIMIT` 分类尚不代表超限终止已实现；取消及清理状态见 SDK-02 部分。
+使用 `SandboxException.code()` 和 `phase()` 映射错误，不匹配自由文本。内建路径准备、平台部署、启动、捕获、探针与已确认清理失败均按操作分类；输出超限、超时和取消保留独立停止原因。旧构造器和无法分类的自定义执行错误保守返回 `UNKNOWN`。客户端也封装后端未处理的 RuntimeException/LinkageError，原始异常只在显式调试接口中提供。
+
+Windows worker 协议 v6 按枚举名称传递错误码和阶段，原始诊断限长并只通过调试 API 读取；旧版本或无效枚举明确拒绝。专用账户安装必须重新供应同版本 worker。协议不是不可信客户端的网络接口。
 
 旧构造器和方法签名保留，但诊断行为有明确变化：
 

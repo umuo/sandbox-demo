@@ -43,6 +43,14 @@ public final class LinuxBubblewrapSandboxRunner implements SandboxRunner {
                     java.nio.file.Paths.get("/etc/pki"),
                     java.nio.file.Paths.get("/etc/ca-certificates"));
 
+    private volatile String observedVersion;
+
+    @Override
+    public io.github.sandboxdemo.api.SandboxBackendInfo backendInfo() {
+        return io.github.sandboxdemo.api.SandboxBackendInfo.current(
+                io.github.sandboxdemo.api.SandboxPlatform.LINUX, backendName(), observedVersion);
+    }
+
     @Override
     public boolean supportsOutputPolicy(io.github.sandboxdemo.api.SandboxPolicy policy) {
         return true;
@@ -81,6 +89,8 @@ public final class LinuxBubblewrapSandboxRunner implements SandboxRunner {
             process = new ProcessBuilder(command).redirectErrorStream(true).start();
         } catch (IOException e) {
             throw new SandboxBackendUnavailableException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                    io.github.sandboxdemo.api.SandboxPhase.PROBE,
                     "failed to start bubblewrap readiness probe: " + e.getMessage());
         }
         boolean completed = process.waitFor(5, TimeUnit.SECONDS);
@@ -88,6 +98,8 @@ public final class LinuxBubblewrapSandboxRunner implements SandboxRunner {
             process.destroyForcibly();
             process.waitFor(1, TimeUnit.SECONDS);
             throw new SandboxBackendUnavailableException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                    io.github.sandboxdemo.api.SandboxPhase.PROBE,
                     "bubblewrap namespace readiness probe did not complete");
         }
         String output;
@@ -97,10 +109,16 @@ public final class LinuxBubblewrapSandboxRunner implements SandboxRunner {
                             io.github.sandboxdemo.core.Java8.readAllBytes(process.getInputStream()),
                             StandardCharsets.UTF_8);
         } catch (IOException e) {
-            throw new SandboxException("failed to read bubblewrap readiness output", e);
+            throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                    io.github.sandboxdemo.api.SandboxPhase.PROBE,
+                    "failed to read bubblewrap readiness output",
+                    e);
         }
         if (process.exitValue() != 0) {
             throw new SandboxBackendUnavailableException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                    io.github.sandboxdemo.api.SandboxPhase.PROBE,
                     "bubblewrap namespace readiness probe failed (exit="
                             + process.exitValue()
                             + "): "
@@ -110,7 +128,25 @@ public final class LinuxBubblewrapSandboxRunner implements SandboxRunner {
     }
 
     @Override
+    public void validate(SandboxRequest request) throws SandboxException, InterruptedException {
+        SandboxResult result = execute(request, true);
+        if (!result.completeSuccessful()) {
+            throw new SandboxException(
+                    result.timedOut()
+                            ? io.github.sandboxdemo.api.SandboxErrorCode.TIMEOUT
+                            : io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                    io.github.sandboxdemo.api.SandboxPhase.PROBE,
+                    "Linux policy probe failed: " + result.stderrUtf8());
+        }
+    }
+
+    @Override
     public SandboxResult execute(SandboxRequest request)
+            throws SandboxException, InterruptedException {
+        return execute(request, false);
+    }
+
+    private SandboxResult execute(SandboxRequest request, boolean probe)
             throws SandboxException, InterruptedException {
 
         io.github.sandboxdemo.core.ExecutionContext context =
@@ -129,6 +165,24 @@ public final class LinuxBubblewrapSandboxRunner implements SandboxRunner {
                             policy.workingDirectory(),
                             environment,
                             policy.allowPathSearch());
+            if (probe) {
+                final Path target = executable;
+                if (policy.readPolicy() == ReadPolicy.DECLARED_ONLY
+                        && policy.readableRoots().stream().noneMatch(target::startsWith)
+                        && RUNTIME_ROOTS.stream().noneMatch(target::startsWith)) {
+                    throw new SandboxException(
+                            io.github.sandboxdemo.api.SandboxErrorCode.POLICY_INVALID,
+                            io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                            "executable is outside effective readable roots");
+                }
+                environment = EnvironmentPolicy.probe(policy);
+                executable = java.nio.file.Paths.get("/bin/true");
+                if (policy.readPolicy() == ReadPolicy.HOST
+                        || policy.readableRoots().stream().anyMatch(bwrap::startsWith)
+                        || RUNTIME_ROOTS.stream().anyMatch(bwrap::startsWith)) {
+                    executable = bwrap;
+                }
+            }
             Path seccompFilter =
                     LinuxSeccompFilter.write(policy.privateTempDirectory(), policy.networkPolicy());
 
@@ -184,7 +238,11 @@ public final class LinuxBubblewrapSandboxRunner implements SandboxRunner {
             sandboxCommand.add(policy.workingDirectory().toString());
             sandboxCommand.add("--");
             sandboxCommand.add(executable.toString());
-            sandboxCommand.addAll(request.command().arguments());
+            if (!probe) {
+                sandboxCommand.addAll(request.command().arguments());
+            } else if (executable.equals(bwrap)) {
+                sandboxCommand.add("--version");
+            }
 
             // Open the BPF program on descriptor 3 and then replace this fixed,
             // trusted shell with bwrap. User command arguments remain distinct argv
@@ -199,13 +257,13 @@ public final class LinuxBubblewrapSandboxRunner implements SandboxRunner {
             SandboxResult result =
                     ProcessExecutor.execute(
                             command,
-                            policy,
+                            probe ? policy.forProbe() : policy,
                             environment,
-                            request.standardInput(),
-                            request.stdoutConsumer(),
-                            request.stderrConsumer(),
-                            request.stdoutTextConsumer(),
-                            request.stderrTextConsumer(),
+                            probe ? new byte[0] : request.standardInput(),
+                            probe ? null : request.stdoutConsumer(),
+                            probe ? null : request.stderrConsumer(),
+                            probe ? null : request.stdoutTextConsumer(),
+                            probe ? null : request.stderrTextConsumer(),
                             request.stdoutCharset(),
                             request.stderrCharset(),
                             request.stdoutCharsetAuto(),
@@ -213,8 +271,13 @@ public final class LinuxBubblewrapSandboxRunner implements SandboxRunner {
                             true);
             if (isBubblewrapBootstrapFailure(result)) {
                 throw new SandboxBackendUnavailableException(
+                        io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                        io.github.sandboxdemo.api.SandboxPhase.PROBE,
                         "bubblewrap is installed but the host refused its namespace setup: "
                                 + result.stderrUtf8().trim());
+            }
+            if (probe && executable.equals(bwrap) && result.completeSuccessful()) {
+                observedVersion = result.stdoutUtf8().trim();
             }
             return result;
         } finally {
@@ -255,6 +318,8 @@ public final class LinuxBubblewrapSandboxRunner implements SandboxRunner {
             }
         }
         throw new SandboxBackendUnavailableException(
+                io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                io.github.sandboxdemo.api.SandboxPhase.PROBE,
                 "bubblewrap is required. Install it with the OS package manager "
                         + "or set SANDBOX_BWRAP to an absolute executable path.");
     }

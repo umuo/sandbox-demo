@@ -36,12 +36,43 @@ public final class WindowsProductionSandboxRunner implements SandboxRunner {
     }
 
     @Override
+    public io.github.sandboxdemo.api.SandboxBackendInfo backendInfo() {
+        return io.github.sandboxdemo.api.SandboxBackendInfo.current(
+                io.github.sandboxdemo.api.SandboxPlatform.WINDOWS,
+                backendName(),
+                "windows-native; OS "
+                        + System.getProperty("os.version")
+                        + "; JNA "
+                        + com.sun.jna.Native.VERSION
+                        + "; worker-protocol "
+                        + WindowsWorkerProtocol.VERSION);
+    }
+
+    @Override
     public String backendName() {
         return "windows-dedicated-user-restricted-token";
     }
 
     @Override
+    public void validate(SandboxRequest request) throws SandboxException, InterruptedException {
+        SandboxResult result = execute(request, true);
+        if (!result.completeSuccessful()) {
+            throw new SandboxException(
+                    result.timedOut()
+                            ? io.github.sandboxdemo.api.SandboxErrorCode.TIMEOUT
+                            : io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                    io.github.sandboxdemo.api.SandboxPhase.PROBE,
+                    "Windows policy probe failed: " + result.stderrUtf8());
+        }
+    }
+
+    @Override
     public SandboxResult execute(SandboxRequest request)
+            throws SandboxException, InterruptedException {
+        return execute(request, false);
+    }
+
+    private SandboxResult execute(SandboxRequest request, boolean probe)
             throws SandboxException, InterruptedException {
         io.github.sandboxdemo.core.ExecutionContext context =
                 io.github.sandboxdemo.core.ExecutionContext.current();
@@ -57,6 +88,8 @@ public final class WindowsProductionSandboxRunner implements SandboxRunner {
         try {
             if (policy.readPolicy() != ReadPolicy.HOST) {
                 throw new SandboxBackendUnavailableException(
+                        io.github.sandboxdemo.api.SandboxErrorCode.POLICY_UNSUPPORTED,
+                        io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
                         "Native Windows restricted tokens cannot provide a compatible "
                                 + "allowlist-only read namespace. Select ReadPolicy.HOST for the "
                                 + "workspace-write model, or run strict-confidential workloads in "
@@ -78,9 +111,29 @@ public final class WindowsProductionSandboxRunner implements SandboxRunner {
                             policy.workingDirectory(),
                             environment,
                             policy.allowPathSearch());
+            Path target = executable;
+            if (probe) {
+                executable =
+                        java.nio.file.Paths.get(
+                                System.getenv().getOrDefault("SystemRoot", "C:\\Windows"),
+                                "System32",
+                                "cmd.exe");
+                environment = EnvironmentPolicy.probe(policy);
+            }
+            java.util.List<String> arguments =
+                    probe
+                            ? io.github.sandboxdemo.core.Java8.listOf("/d", "/s", "/c", "exit /b 0")
+                            : request.command().arguments();
+            byte[] input = probe ? new byte[0] : request.standardInput();
+            ValidatedPolicy effective = probe ? policy.forProbe() : policy;
+            java.util.List<Path> leasedTools =
+                    probe
+                            ? io.github.sandboxdemo.core.Java8.listOf(target, executable)
+                            : java.util.Collections.singletonList(executable);
+
             WindowsWorkerRuntime runtime = WindowsWorkerRuntime.resolve(installation, policy);
 
-            try (WindowsPathLease ignored = WindowsPathLease.acquire(policy, executable);
+            try (WindowsPathLease ignored = WindowsPathLease.acquire(policy, leasedTools);
                     WindowsAclManager.WindowsAclLease acl =
                             new WindowsAclManager(installation.home())
                                     .apply(
@@ -93,9 +146,9 @@ public final class WindowsProductionSandboxRunner implements SandboxRunner {
                         new WindowsWorkerProtocol.WorkerRequest(
                                 credential.sid(),
                                 executable,
-                                request.command().arguments(),
-                                request.standardInput(),
-                                policy,
+                                arguments,
+                                input,
+                                effective,
                                 environment,
                                 acl.capabilitySids());
                 WindowsWorkerProtocol.writeRequest(session.requestFile(), workerRequest);
@@ -104,11 +157,11 @@ public final class WindowsProductionSandboxRunner implements SandboxRunner {
                         credential,
                         runtime,
                         session,
-                        policy,
-                        request.stdoutConsumer(),
-                        request.stderrConsumer(),
-                        request.stdoutTextConsumer(),
-                        request.stderrTextConsumer(),
+                        effective,
+                        probe ? null : request.stdoutConsumer(),
+                        probe ? null : request.stderrConsumer(),
+                        probe ? null : request.stdoutTextConsumer(),
+                        probe ? null : request.stderrTextConsumer(),
                         request.stdoutCharset(),
                         request.stderrCharset(),
                         request.stdoutCharsetAuto(),

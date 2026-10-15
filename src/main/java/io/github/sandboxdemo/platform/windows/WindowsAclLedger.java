@@ -64,7 +64,11 @@ final class WindowsAclLedger {
                 }
             }
         } catch (IOException e) {
-            throw new SandboxException("failed to record Windows workspace ACL metadata", e);
+            throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.POLICY_INVALID,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                    "failed to record Windows workspace ACL metadata",
+                    e);
         }
     }
 
@@ -80,13 +84,20 @@ final class WindowsAclLedger {
                 }
                 String[] parts = line.split("\\t", 2);
                 if (parts.length != 2) {
-                    throw new SandboxException("invalid Windows workspace ACL ledger entry");
+                    throw new SandboxException(
+                            io.github.sandboxdemo.api.SandboxErrorCode.POLICY_INVALID,
+                            io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                            "invalid Windows workspace ACL ledger entry");
                 }
                 result.add(new Entry(java.nio.file.Paths.get(decode(parts[0])), parts[1]));
             }
             return io.github.sandboxdemo.core.Java8.copyList(result);
         } catch (IOException | IllegalArgumentException e) {
-            throw new SandboxException("failed to read Windows workspace ACL metadata", e);
+            throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.POLICY_INVALID,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                    "failed to read Windows workspace ACL metadata",
+                    e);
         }
     }
 
@@ -94,7 +105,11 @@ final class WindowsAclLedger {
         try {
             Files.deleteIfExists(file);
         } catch (IOException e) {
-            throw new SandboxException("failed to remove Windows workspace ACL metadata", e);
+            throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.CLEANUP_FAILED,
+                    io.github.sandboxdemo.api.SandboxPhase.CLEANUP,
+                    "failed to remove Windows workspace ACL metadata",
+                    e);
         }
     }
 

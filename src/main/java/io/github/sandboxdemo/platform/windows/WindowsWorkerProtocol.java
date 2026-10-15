@@ -26,7 +26,7 @@ final class WindowsWorkerProtocol {
 
     private static final int REQUEST_MAGIC = 0x53425851;
     private static final int RESULT_MAGIC = 0x53425852;
-    private static final int VERSION = 5;
+    static final int VERSION = 6;
     private static final int MAX_STRING_BYTES = 1024 * 1024;
     private static final int MAX_BINARY_BYTES = 64 * 1024 * 1024;
     private static final int MAX_STANDARD_INPUT_BYTES = 8 * 1024 * 1024;
@@ -62,7 +62,11 @@ final class WindowsWorkerProtocol {
             writeMap(output, request.environment());
             writeStrings(output, request.capabilitySids());
         } catch (IOException e) {
-            throw new SandboxException("failed to write Windows worker request", e);
+            throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.POLICY_INVALID,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                    "failed to write Windows worker request",
+                    e);
         }
     }
 
@@ -81,15 +85,24 @@ final class WindowsWorkerProtocol {
             Path temp = java.nio.file.Paths.get(readString(input));
             int networkOrdinal = input.readInt();
             if (networkOrdinal < 0 || networkOrdinal >= NetworkPolicy.values().length) {
-                throw new SandboxException("invalid network policy in Windows worker request");
+                throw new SandboxException(
+                        io.github.sandboxdemo.api.SandboxErrorCode.POLICY_INVALID,
+                        io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                        "invalid network policy in Windows worker request");
             }
             int readOrdinal = input.readInt();
             if (readOrdinal < 0 || readOrdinal >= ReadPolicy.values().length) {
-                throw new SandboxException("invalid read policy in Windows worker request");
+                throw new SandboxException(
+                        io.github.sandboxdemo.api.SandboxErrorCode.POLICY_INVALID,
+                        io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                        "invalid read policy in Windows worker request");
             }
             int deletionOrdinal = input.readInt();
             if (deletionOrdinal < 0 || deletionOrdinal >= DeletionPolicy.values().length) {
-                throw new SandboxException("invalid deletion policy in Windows worker request");
+                throw new SandboxException(
+                        io.github.sandboxdemo.api.SandboxErrorCode.POLICY_INVALID,
+                        io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                        "invalid deletion policy in Windows worker request");
             }
             long timeoutMillis = input.readLong();
             int maxOutputBytes = input.readInt();
@@ -103,18 +116,27 @@ final class WindowsWorkerProtocol {
                     || callback >= io.github.sandboxdemo.api.OutputCallbackMode.values().length
                     || combined < 0
                     || combined > 128 * 1024 * 1024) {
-                throw new SandboxException("invalid output policy in Windows worker request");
+                throw new SandboxException(
+                        io.github.sandboxdemo.api.SandboxErrorCode.POLICY_INVALID,
+                        io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                        "invalid output policy in Windows worker request");
             }
             if (timeoutMillis < 1
                     || timeoutMillis > Duration.ofHours(24).toMillis()
                     || maxOutputBytes < 1
                     || maxOutputBytes > MAX_BINARY_BYTES) {
-                throw new SandboxException("invalid limits in Windows worker request");
+                throw new SandboxException(
+                        io.github.sandboxdemo.api.SandboxErrorCode.POLICY_INVALID,
+                        io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                        "invalid limits in Windows worker request");
             }
             Map<String, String> environment = readMap(input);
             List<String> capabilitySids = readStrings(input, MAX_PATHS);
             if (capabilitySids.isEmpty()) {
-                throw new SandboxException("Windows worker request has no capability SID");
+                throw new SandboxException(
+                        io.github.sandboxdemo.api.SandboxErrorCode.POLICY_INVALID,
+                        io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                        "Windows worker request has no capability SID");
             }
             ValidatedPolicy policy =
                     new ValidatedPolicy(
@@ -141,9 +163,15 @@ final class WindowsWorkerProtocol {
                     environment,
                     capabilitySids);
         } catch (EOFException e) {
-            throw new SandboxException("truncated Windows worker request", e);
+            throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.POLICY_INVALID,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                    "truncated Windows worker request",
+                    e);
         } catch (IOException | IllegalArgumentException e) {
             throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.POLICY_INVALID,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
                     "failed to read Windows worker request ("
                             + e.getClass().getSimpleName()
                             + ": "
@@ -161,6 +189,8 @@ final class WindowsWorkerProtocol {
             output.writeInt(VERSION);
             output.writeBoolean(workerError != null);
             if (workerError != null) {
+                writeString(output, io.github.sandboxdemo.api.SandboxErrorCode.UNKNOWN.name());
+                writeString(output, io.github.sandboxdemo.api.SandboxPhase.EXECUTION.name());
                 writeString(output, workerError);
                 return;
             }
@@ -173,7 +203,32 @@ final class WindowsWorkerProtocol {
             output.writeLong(result.duration().toNanos());
             output.writeBoolean(result.outputLimitTerminated());
         } catch (IOException e) {
-            throw new SandboxException("failed to write Windows worker result", e);
+            throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.OUTPUT_CAPTURE_FAILED,
+                    io.github.sandboxdemo.api.SandboxPhase.OUTPUT,
+                    "failed to write Windows worker result",
+                    e);
+        }
+    }
+
+    static void writeFailure(Path file, SandboxException failure) throws SandboxException {
+        try (DataOutputStream output =
+                new DataOutputStream(new BufferedOutputStream(Files.newOutputStream(file)))) {
+            output.writeInt(RESULT_MAGIC);
+            output.writeInt(VERSION);
+            output.writeBoolean(true);
+            writeString(output, failure.code().name());
+            writeString(output, failure.phase().name());
+            String diagnostic = failure.debugMessage();
+            writeString(
+                    output,
+                    diagnostic.length() <= 2000 ? diagnostic : diagnostic.substring(0, 2000));
+        } catch (IOException error) {
+            throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.OUTPUT_CAPTURE_FAILED,
+                    io.github.sandboxdemo.api.SandboxPhase.OUTPUT,
+                    "failed to write worker failure",
+                    error);
         }
     }
 
@@ -182,7 +237,21 @@ final class WindowsWorkerProtocol {
                 new DataInputStream(new BufferedInputStream(Files.newInputStream(file)))) {
             requireHeader(input, RESULT_MAGIC);
             if (input.readBoolean()) {
-                throw new SandboxException("Windows sandbox worker failed: " + readString(input));
+                String code = readString(input),
+                        phase = readString(input),
+                        diagnostic = readString(input);
+                try {
+                    throw new SandboxException(
+                            io.github.sandboxdemo.api.SandboxErrorCode.valueOf(code),
+                            io.github.sandboxdemo.api.SandboxPhase.valueOf(phase),
+                            diagnostic);
+                } catch (IllegalArgumentException invalid) {
+                    throw new SandboxException(
+                            io.github.sandboxdemo.api.SandboxErrorCode.OUTPUT_CAPTURE_FAILED,
+                            io.github.sandboxdemo.api.SandboxPhase.OUTPUT,
+                            "invalid worker error fields",
+                            invalid);
+                }
             }
             int exitCode = input.readInt();
             boolean timedOut = input.readBoolean();
@@ -201,16 +270,31 @@ final class WindowsWorkerProtocol {
                     Duration.ofNanos(Math.max(0, durationNanos)),
                     input.readBoolean());
         } catch (EOFException e) {
-            throw new SandboxException("truncated Windows worker result", e);
+            throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.OUTPUT_CAPTURE_FAILED,
+                    io.github.sandboxdemo.api.SandboxPhase.OUTPUT,
+                    "truncated Windows worker result",
+                    e);
         } catch (IOException e) {
-            throw new SandboxException("failed to read Windows worker result", e);
+            throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.OUTPUT_CAPTURE_FAILED,
+                    io.github.sandboxdemo.api.SandboxPhase.OUTPUT,
+                    "failed to read Windows worker result",
+                    e);
         }
     }
 
     private static void requireHeader(DataInputStream input, int expected)
             throws IOException, SandboxException {
         if (input.readInt() != expected || input.readInt() != VERSION) {
-            throw new SandboxException("incompatible Windows worker protocol");
+            throw new SandboxException(
+                    expected == REQUEST_MAGIC
+                            ? io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE
+                            : io.github.sandboxdemo.api.SandboxErrorCode.OUTPUT_CAPTURE_FAILED,
+                    expected == REQUEST_MAGIC
+                            ? io.github.sandboxdemo.api.SandboxPhase.PREPARATION
+                            : io.github.sandboxdemo.api.SandboxPhase.OUTPUT,
+                    "incompatible Windows worker protocol");
         }
     }
 
@@ -247,7 +331,10 @@ final class WindowsWorkerProtocol {
         for (int i = 0; i < count; i++) {
             String previous = result.put(readString(input), readString(input));
             if (previous != null) {
-                throw new SandboxException("duplicate environment variable in worker request");
+                throw new SandboxException(
+                        io.github.sandboxdemo.api.SandboxErrorCode.POLICY_INVALID,
+                        io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                        "duplicate environment variable in worker request");
             }
         }
         return io.github.sandboxdemo.core.Java8.copyMap(result);
@@ -275,7 +362,10 @@ final class WindowsWorkerProtocol {
             throws IOException, SandboxException {
         int count = input.readInt();
         if (count < 0 || count > maximum) {
-            throw new SandboxException("invalid number of " + description + ": " + count);
+            throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.POLICY_INVALID,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                    "invalid number of " + description + ": " + count);
         }
         return count;
     }
@@ -297,7 +387,10 @@ final class WindowsWorkerProtocol {
             throws IOException, SandboxException {
         int length = input.readInt();
         if (length < 0 || length > maximum) {
-            throw new SandboxException("invalid binary field length: " + length);
+            throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.POLICY_INVALID,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                    "invalid binary field length: " + length);
         }
         byte[] bytes = new byte[length];
         input.readFully(bytes);

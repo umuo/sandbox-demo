@@ -29,6 +29,17 @@ public final class WindowsRestrictedTokenSandboxRunner implements SandboxRunner 
     }
 
     @Override
+    public io.github.sandboxdemo.api.SandboxBackendInfo backendInfo() {
+        return io.github.sandboxdemo.api.SandboxBackendInfo.current(
+                io.github.sandboxdemo.api.SandboxPlatform.WINDOWS,
+                backendName(),
+                "windows-native; OS "
+                        + System.getProperty("os.version")
+                        + "; JNA "
+                        + com.sun.jna.Native.VERSION);
+    }
+
+    @Override
     public String backendName() {
         return "windows-restricted-token";
     }
@@ -53,6 +64,8 @@ public final class WindowsRestrictedTokenSandboxRunner implements SandboxRunner 
             SandboxResult result = new WindowsRestrictedTokenSandboxRunner().execute(request);
             if (!result.successful()) {
                 throw new SandboxBackendUnavailableException(
+                        io.github.sandboxdemo.api.SandboxErrorCode.POLICY_UNSUPPORTED,
+                        io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
                         "Windows restricted-token readiness probe failed (exit="
                                 + result.exitCode()
                                 + "): "
@@ -61,6 +74,8 @@ public final class WindowsRestrictedTokenSandboxRunner implements SandboxRunner 
             return "setup-free Windows restricted-token probe passed";
         } catch (IOException e) {
             throw new SandboxBackendUnavailableException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.POLICY_UNSUPPORTED,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
                     "failed to create Windows readiness workspace: " + e.getMessage());
         } finally {
             if (workspace != null) {
@@ -74,7 +89,25 @@ public final class WindowsRestrictedTokenSandboxRunner implements SandboxRunner 
     }
 
     @Override
+    public void validate(SandboxRequest request) throws SandboxException, InterruptedException {
+        SandboxResult result = execute(request, true);
+        if (!result.completeSuccessful()) {
+            throw new SandboxException(
+                    result.timedOut()
+                            ? io.github.sandboxdemo.api.SandboxErrorCode.TIMEOUT
+                            : io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                    io.github.sandboxdemo.api.SandboxPhase.PROBE,
+                    "Windows policy probe failed: " + result.stderrUtf8());
+        }
+    }
+
+    @Override
     public SandboxResult execute(SandboxRequest request)
+            throws SandboxException, InterruptedException {
+        return execute(request, false);
+    }
+
+    private SandboxResult execute(SandboxRequest request, boolean probe)
             throws SandboxException, InterruptedException {
 
         requireUnelevated();
@@ -92,12 +125,15 @@ public final class WindowsRestrictedTokenSandboxRunner implements SandboxRunner 
         try {
             if (policy.readPolicy() != ReadPolicy.HOST) {
                 throw new SandboxBackendUnavailableException(
-                        "The unelevated Windows backend cannot enforce strict read isolation. "
-                                + "Use the production dedicated-user backend or explicitly request "
-                                + "ReadPolicy.HOST for development-only use.");
+                        io.github.sandboxdemo.api.SandboxErrorCode.POLICY_UNSUPPORTED,
+                        io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                        "Native Windows backends cannot enforce strict read isolation. "
+                                + "A backend providing a separate read namespace is required.");
             }
             if (policy.networkPolicy() == NetworkPolicy.DENY) {
                 throw new SandboxBackendUnavailableException(
+                        io.github.sandboxdemo.api.SandboxErrorCode.POLICY_UNSUPPORTED,
+                        io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
                         "This unelevated Windows backend enforces file writes and process lifetime, "
                                 + "but cannot enforce network deny. Request NetworkPolicy.ALLOW or add "
                                 + "a dedicated offline user plus Windows Firewall setup.");
@@ -110,20 +146,40 @@ public final class WindowsRestrictedTokenSandboxRunner implements SandboxRunner 
                             policy.workingDirectory(),
                             environment,
                             policy.allowPathSearch());
-            try (WindowsPathLease ignored = WindowsPathLease.acquire(policy, executable);
+            Path target = executable;
+            if (probe) {
+                executable =
+                        java.nio.file.Paths.get(
+                                System.getenv().getOrDefault("SystemRoot", "C:\\Windows"),
+                                "System32",
+                                "cmd.exe");
+                environment = EnvironmentPolicy.probe(policy);
+            }
+            java.util.List<String> arguments =
+                    probe
+                            ? io.github.sandboxdemo.core.Java8.listOf("/d", "/s", "/c", "exit /b 0")
+                            : request.command().arguments();
+            byte[] input = probe ? new byte[0] : request.standardInput();
+            ValidatedPolicy effective = probe ? policy.forProbe() : policy;
+            java.util.List<Path> leasedTools =
+                    probe
+                            ? io.github.sandboxdemo.core.Java8.listOf(target, executable)
+                            : java.util.Collections.singletonList(executable);
+
+            try (WindowsPathLease ignored = WindowsPathLease.acquire(policy, leasedTools);
                     WindowsAclManager.WindowsAclLease acl = new WindowsAclManager().apply(policy)) {
                 return WindowsRestrictedProcessLauncher.execute(
                         executable,
-                        request.command().arguments(),
-                        request.standardInput(),
-                        policy,
+                        arguments,
+                        input,
+                        effective,
                         environment,
                         acl.capabilitySids(),
                         false,
-                        request.stdoutConsumer(),
-                        request.stderrConsumer(),
-                        request.stdoutTextConsumer(),
-                        request.stderrTextConsumer(),
+                        probe ? null : request.stdoutConsumer(),
+                        probe ? null : request.stderrConsumer(),
+                        probe ? null : request.stdoutTextConsumer(),
+                        probe ? null : request.stderrTextConsumer(),
                         request.stdoutCharset(),
                         request.stderrCharset(),
                         request.stdoutCharsetAuto(),
@@ -143,6 +199,8 @@ public final class WindowsRestrictedTokenSandboxRunner implements SandboxRunner 
     private static void requireUnelevated() throws SandboxBackendUnavailableException {
         if (com.sun.jna.platform.win32.Advapi32Util.isCurrentProcessElevated()) {
             throw new SandboxBackendUnavailableException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.BACKEND_UNAVAILABLE,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
                     "the setup-free Windows sandbox refuses to run from an elevated process; "
                             + "restart the Agent normally without Administrator elevation");
         }

@@ -22,6 +22,33 @@ public final class EnvironmentPolicy {
 
     private EnvironmentPolicy() {}
 
+    /** Trusted probes never inherit caller loader/runtime injection variables or caller PATH. */
+    public static Map<String, String> probe(ValidatedPolicy policy) {
+        Map<String, String> result = new LinkedHashMap<>();
+        for (String name : ALLOWED_HOST_VARIABLES) {
+            if (!"PATH".equals(name)) {
+                String value = System.getenv(name);
+                if (value != null) {
+                    result.put(name, value);
+                }
+            }
+        }
+        String root = System.getenv().getOrDefault("SystemRoot", "C:\\Windows");
+        result.put(
+                "PATH",
+                io.github.sandboxdemo.api.SandboxPlatform.current()
+                                == io.github.sandboxdemo.api.SandboxPlatform.WINDOWS
+                        ? java.nio.file.Paths.get(root, "System32").toString()
+                        : "/usr/bin:/bin");
+        String temp = policy.privateTempDirectory().toString();
+        result.put("TEMP", temp);
+        result.put("TMP", temp);
+        result.put("TMPDIR", temp);
+        result.put("HOME", policy.workingDirectory().toString());
+        result.put("USERPROFILE", policy.workingDirectory().toString());
+        return io.github.sandboxdemo.core.Java8.copyMap(result);
+    }
+
     public static Map<String, String> build(SandboxRequest request, ValidatedPolicy policy) {
 
         Map<String, String> result = new LinkedHashMap<>();

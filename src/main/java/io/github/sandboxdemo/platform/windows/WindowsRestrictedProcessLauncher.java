@@ -560,7 +560,10 @@ final class WindowsRestrictedProcessLauncher {
         }
         Pointer block = created.getValue();
         if (block == null) {
-            throw new SandboxException("CreateEnvironmentBlock returned a NULL environment");
+            throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.START_FAILED,
+                    io.github.sandboxdemo.api.SandboxPhase.START,
+                    "CreateEnvironmentBlock returned a NULL environment");
         }
 
         Map<String, String> result = new LinkedHashMap<>();
@@ -574,6 +577,8 @@ final class WindowsRestrictedProcessLauncher {
                 }
                 if (++entries > 4096 || offset > 1024L * 1024L) {
                     throw new SandboxException(
+                            io.github.sandboxdemo.api.SandboxErrorCode.START_FAILED,
+                            io.github.sandboxdemo.api.SandboxPhase.START,
                             "Windows user environment block is unreasonably large");
                 }
                 int separator = entry.indexOf('=');
@@ -654,7 +659,10 @@ final class WindowsRestrictedProcessLauncher {
         long groupSize = Native.POINTER_SIZE == Long.BYTES ? 16L : 8L;
         if (groupCount < 0
                 || (long) groupCount * groupSize > tokenGroups.size() - firstGroupOffset) {
-            throw new SandboxException("invalid TOKEN_GROUPS returned for current token");
+            throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.START_FAILED,
+                    io.github.sandboxdemo.api.SandboxPhase.START,
+                    "invalid TOKEN_GROUPS returned for current token");
         }
         for (int i = 0; i < groupCount; i++) {
             long groupOffset = firstGroupOffset + (long) i * groupSize;
@@ -663,7 +671,10 @@ final class WindowsRestrictedProcessLauncher {
                 return sidToString(tokenGroups.getPointer(groupOffset));
             }
         }
-        throw new SandboxException("current Windows token has no logon-session SID");
+        throw new SandboxException(
+                io.github.sandboxdemo.api.SandboxErrorCode.START_FAILED,
+                io.github.sandboxdemo.api.SandboxPhase.START,
+                "current Windows token has no logon-session SID");
     }
 
     private static String sidToString(Pointer sid) throws SandboxException {
@@ -698,6 +709,8 @@ final class WindowsRestrictedProcessLauncher {
         Pointer currentAcl = tokenInformation.getPointer(0);
         if (currentAcl == null) {
             throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.START_FAILED,
+                    io.github.sandboxdemo.api.SandboxPhase.START,
                     "refusing to use a restricted token with a NULL default DACL");
         }
 
@@ -826,7 +839,11 @@ final class WindowsRestrictedProcessLauncher {
         try {
             memoryBytes = Math.multiplyExact(memoryMib, 1024L * 1024L);
         } catch (ArithmeticException e) {
-            throw new SandboxException("SANDBOX_WINDOWS_MAX_MEMORY_MIB is too large", e);
+            throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.POLICY_INVALID,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                    "SANDBOX_WINDOWS_MAX_MEMORY_MIB is too large",
+                    e);
         }
         Pointer job = Kernel32.INSTANCE.CreateJobObjectW(null, null);
         if (isInvalid(job)) {
@@ -854,7 +871,10 @@ final class WindowsRestrictedProcessLauncher {
             throws SandboxException {
         long value = positiveEnvironmentLong(name, defaultValue);
         if (value > Integer.MAX_VALUE) {
-            throw new SandboxException(name + " exceeds the supported integer range");
+            throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.POLICY_INVALID,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                    name + " exceeds the supported integer range");
         }
         return (int) value;
     }
@@ -872,7 +892,11 @@ final class WindowsRestrictedProcessLauncher {
             }
             return value;
         } catch (NumberFormatException e) {
-            throw new SandboxException(name + " must be a positive integer", e);
+            throw new SandboxException(
+                    io.github.sandboxdemo.api.SandboxErrorCode.POLICY_INVALID,
+                    io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
+                    name + " must be a positive integer",
+                    e);
         }
     }
 
@@ -904,10 +928,16 @@ final class WindowsRestrictedProcessLauncher {
                 if (error == ERROR_BROKEN_PIPE || error == ERROR_NO_DATA) {
                     return;
                 }
-                throw new SandboxException("WriteFile(stdin) failed, Win32=" + error);
+                throw new SandboxException(
+                        io.github.sandboxdemo.api.SandboxErrorCode.OUTPUT_CAPTURE_FAILED,
+                        io.github.sandboxdemo.api.SandboxPhase.OUTPUT,
+                        "WriteFile(stdin) failed, Win32=" + error);
             }
             if (written.getValue() < 1) {
-                throw new SandboxException("WriteFile(stdin) made no progress");
+                throw new SandboxException(
+                        io.github.sandboxdemo.api.SandboxErrorCode.OUTPUT_CAPTURE_FAILED,
+                        io.github.sandboxdemo.api.SandboxPhase.OUTPUT,
+                        "WriteFile(stdin) made no progress");
             }
             offset += written.getValue();
         }
@@ -937,7 +967,10 @@ final class WindowsRestrictedProcessLauncher {
                     if (error == ERROR_BROKEN_PIPE) {
                         break;
                     }
-                    throw new SandboxException("ReadFile(pipe) failed, Win32=" + error);
+                    throw new SandboxException(
+                            io.github.sandboxdemo.api.SandboxErrorCode.OUTPUT_CAPTURE_FAILED,
+                            io.github.sandboxdemo.api.SandboxPhase.OUTPUT,
+                            "ReadFile(pipe) failed, Win32=" + error);
                 }
                 int count = read.getValue();
                 if (count == 0) {
@@ -958,7 +991,10 @@ final class WindowsRestrictedProcessLauncher {
     }
 
     private static SandboxException win32(String operation, int error) {
-        return new SandboxException(operation + " failed, Win32=" + error);
+        return new SandboxException(
+                io.github.sandboxdemo.api.SandboxErrorCode.START_FAILED,
+                io.github.sandboxdemo.api.SandboxPhase.START,
+                operation + " failed, Win32=" + error);
     }
 
     private static boolean isInvalid(Pointer handle) {
