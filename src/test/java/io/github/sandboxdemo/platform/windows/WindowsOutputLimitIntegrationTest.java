@@ -13,7 +13,7 @@ import org.junit.jupiter.api.condition.*;
 import org.junit.jupiter.api.io.TempDir;
 
 @EnabledOnOs(OS.WINDOWS)
-@EnabledIfEnvironmentVariable(named = "SANDBOX_WINDOWS_PRODUCTION_TEST", matches = "1")
+@EnabledIf("io.github.sandboxdemo.platform.windows.WindowsNativeTestSupport#enabled")
 class WindowsOutputLimitIntegrationTest {
     @TempDir Path workspace;
 
@@ -55,14 +55,11 @@ class WindowsOutputLimitIntegrationTest {
     }
 
     private SandboxClient client() {
-        return SandboxClient.builder()
-                .windowsProductionHome(WindowsSandboxInstallation.defaultHome())
-                .cleanupGrace(Duration.ofSeconds(2))
-                .build();
+        return WindowsNativeTestSupport.client();
     }
 
     @Test
-    void workerProtocolPreservesOutputLimitAndCombinedRetainedCallbacks() throws Exception {
+    void preservesOutputLimitAndCombinedRetainedCallbacks() throws Exception {
         AtomicInteger observed = new AtomicInteger();
         ThreadPoolExecutor workers = pool();
         try {
@@ -99,7 +96,7 @@ class WindowsOutputLimitIntegrationTest {
     }
 
     @Test
-    void blockedHostCallbackDoesNotEraseWorkerOutputLimitReason() throws Exception {
+    void blockedHostCallbackDoesNotEraseOutputLimitReason() throws Exception {
         CountDownLatch entered = new CountDownLatch(1), release = new CountDownLatch(1);
         ThreadPoolExecutor workers = pool();
         try {

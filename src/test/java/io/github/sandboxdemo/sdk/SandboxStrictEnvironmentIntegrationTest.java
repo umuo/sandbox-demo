@@ -28,9 +28,7 @@ class SandboxStrictEnvironmentIntegrationTest {
                         : Paths.get("/usr/bin").toRealPath();
         SandboxClient client =
                 windows
-                        ? SandboxClient.builder()
-                                .windowsProductionHome(SandboxRuntime.defaultWindowsHome())
-                                .build()
+                        ? io.github.sandboxdemo.platform.windows.WindowsNativeTestSupport.client()
                         : SandboxClient.create();
         SandboxWorkspace workspace = SandboxWorkspace.create(parent);
         try {

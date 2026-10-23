@@ -13,14 +13,12 @@ import org.junit.jupiter.api.condition.*;
 import org.junit.jupiter.api.io.TempDir;
 
 @EnabledOnOs(OS.WINDOWS)
-@EnabledIfEnvironmentVariable(named = "SANDBOX_WINDOWS_PRODUCTION_TEST", matches = "1")
+@EnabledIf("io.github.sandboxdemo.platform.windows.WindowsNativeTestSupport#enabled")
 class WindowsReadinessIntegrationTest {
     @TempDir Path workspace;
 
     private SandboxClient client() {
-        return SandboxClient.builder()
-                .windowsProductionHome(WindowsSandboxInstallation.defaultHome())
-                .build();
+        return WindowsNativeTestSupport.client();
     }
 
     private SandboxRequest.Builder request() {
@@ -38,8 +36,7 @@ class WindowsReadinessIntegrationTest {
     }
 
     @Test
-    void productionPolicyProbeRunsOnlyTrustedWorkerCommandAndReportsUnknownHostCleanup()
-            throws Exception {
+    void policyProbeRunsOnlyTrustedCommandAndReportsUnknownHostCleanup() throws Exception {
         AtomicInteger callbacks = new AtomicInteger();
         SandboxPolicyReadiness readiness =
                 client().readiness(
@@ -55,7 +52,15 @@ class WindowsReadinessIntegrationTest {
         assertFalse(Files.exists(workspace.resolve("caller-target-marker")));
         assertEquals(SandboxCleanupState.CONFIRMED, readiness.cleanup().processes());
         assertEquals(SandboxCleanupState.UNKNOWN, readiness.cleanup().hostResources());
-        assertTrue(readiness.backendInfo().backendVersion().get().contains("worker-protocol 7"));
+        assertTrue(
+                readiness
+                        .backendInfo()
+                        .backendVersion()
+                        .get()
+                        .contains(
+                                WindowsNativeTestSupport.defaultBackend()
+                                        ? "windows-native"
+                                        : "worker-protocol 7"));
         TestEvidence.record(readiness);
     }
 

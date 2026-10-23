@@ -1,0 +1,39 @@
+{
+  "shared": {
+    "WindowsLifecycleIntegrationTest": [
+      "runningCancellationConfirmsJobEmptyButDoesNotInventAclCleanupEvidence",
+      "timeoutReturnsWithinSharedDeadlineAndCleanupGrace"
+    ],
+    "WindowsOutputLimitIntegrationTest": [
+      "preservesOutputLimitAndCombinedRetainedCallbacks",
+      "blockedHostCallbackDoesNotEraseOutputLimitReason"
+    ],
+    "WindowsReadinessIntegrationTest": [
+      "policyProbeRunsOnlyTrustedCommandAndReportsUnknownHostCleanup",
+      "strictReadRemainsUnsupportedBeforeAnyTrustedWorkerOrTargetIsLaunched"
+    ],
+    "WindowsResourceLimitsIntegrationTest": [
+      "aggregateCommittedMemoryLimitDeniesBoundedAllocationAndReclaimsJob",
+      "activeProcessLimitBlocksOneChildAndReclaimsJob"
+    ],
+    "SandboxStrictEnvironmentIntegrationTest": [
+      "nativeStrictTargetExcludesParentSecretsAndUsesPrivateHome"
+    ]
+  },
+  "default": {
+    "WindowsRestrictedTokenSandboxRunnerTest": [
+      "defaultClientAndReadinessProbeRequireNoSetup",
+      "permitsWorkspaceWriteAndBlocksSiblingWrite",
+      "permitsCreateAndModifyButBlocksDeleteAndRename",
+      "readOnlyWorkingDirectoryBlocksDeletionButNestedWritableRootAllowsIt"
+    ],
+    "WindowsDefaultAcceptanceTest": [
+      "acceptanceUsesRealStandardUserAndDefaultBackend",
+      "unsupportedNetworkPolicyFailsBeforeTargetStarts",
+      "concurrentExecutionsKeepWorkspacesAndCleanupIndependent"
+    ]
+  },
+  "production": {
+    "WindowsElevatedRejectionTest": ["elevatedHostCannotProbeOrExecuteDefaultBackend"]
+  }
+}

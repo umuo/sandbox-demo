@@ -25,6 +25,12 @@ class WindowsRestrictedTokenSandboxRunnerTest {
 
     @BeforeEach
     void requireUnelevatedTestProcess() {
+        if (WindowsNativeTestSupport.defaultBackend()) {
+            assertFalse(
+                    com.sun.jna.platform.win32.Advapi32Util.isCurrentProcessElevated(),
+                    "default acceptance must run as an ordinary user");
+            return;
+        }
         Assumptions.assumeFalse(
                 com.sun.jna.platform.win32.Advapi32Util.isCurrentProcessElevated(),
                 "setup-free Windows backend intentionally rejects elevated processes");

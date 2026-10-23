@@ -22,7 +22,8 @@ for report in reports:
             runtime[name] = prop.get('value')
 backend = []
 allowed = {'backend', 'backend.version', 'sdk.version', 'os.name', 'os.version', 'os.arch',
-           'java.version', 'java.vendor', 'scope', 'read.policy', 'network.policy', 'probe.ready'}
+           'java.version', 'java.vendor', 'scope', 'read.policy', 'network.policy', 'probe.ready',
+           'windows.token.elevated'}
 for file in sorted(Path('target/backend-evidence').glob('*.xml')):
     backend.append({entry.get('key'): entry.text for entry in ET.parse(file).getroot().findall('entry')
                     if entry.get('key') in allowed})

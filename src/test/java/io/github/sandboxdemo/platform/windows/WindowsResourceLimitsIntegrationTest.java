@@ -21,10 +21,7 @@ class WindowsResourceLimitsIntegrationTest {
         assertTrue(
                 Files.isRegularFile(fixture),
                 "compile the bounded resource probe before native tests");
-        SandboxClient client =
-                SandboxClient.builder()
-                        .windowsProductionHome(WindowsSandboxInstallation.defaultHome())
-                        .build();
+        SandboxClient client = WindowsNativeTestSupport.client();
         SandboxRequest request =
                 SandboxRequest.builder(workspace, fixture.toString())
                         .argument(mode)

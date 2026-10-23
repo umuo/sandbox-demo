@@ -116,3 +116,21 @@ docs/
 - Windows 默认 native test 无需 setup；可选 dedicated-account test 必须先执行 elevated setup，并覆盖账户、Firewall、worker 和双 Job Object 链路。
 
 跳过不是发布环境验证。生产发布应另设自托管三平台 runner，并把“本平台 enforcement 测试实际执行、未跳过”作为制品晋级条件。
+
+## Windows 原生验收的两种身份
+
+现有 `test` 矩阵的 Windows 路径负责 elevated setup、专用账户后端及卸载；新增 `windows-default` 矩阵在临时 runner 上创建只属于 Users 的本地测试账户，以该真实普通用户运行默认后端。两条路径均覆盖 JDK 8/17/21，不通过降低默认后端的 elevated 拒绝要求来取得覆盖。
+
+普通用户脚本 `.github/scripts/run-windows-default-tests.ps1` 只导出已提交源码到随机 CI 目录，使用独立 Maven repository，不复制 `.git` 或 runner 用户缓存；账户密码仅用于本机登录，不写入脚本与证据。测试目录向该用户授予完整控制，供测试修改合成路径 ACL；没有向系统目录扩大写权限。脚本在 finally 中保存报告并清理账户、profile 与随机目录，超时会终止测试进程树。只在一次性 CI runner 执行该脚本。
+
+共用的生命周期、输出、预检和资源用例由 `WindowsNativeTestSupport` 按显式环境选择后端：`SANDBOX_WINDOWS_DEFAULT_ACCEPTANCE=1` 选择默认后端，`SANDBOX_WINDOWS_PRODUCTION_TEST=1` 选择专用账户，两者不能同时设置。默认路径还验证普通用户 token、默认后端选择、写入/删除边界、策略拒绝和并发工作区独立性。管理员路径单独断言默认后端不能被 elevated 宿主启动。
+
+`.github/scripts/windows-native-required.json` 列出必须执行成功的方法。门禁拒绝缺报告、缺方法、跳过、失败、重复、损坏 XML，以及后端或 token elevation 不匹配；新方法或重命名时应同步审查清单。JSON 证据记录 OS/JDK、身份种类、后端和执行/失败/跳过计数，不含请求正文。默认路径证据在 `target/windows-default/`，专用账户在 `target/`，分别上传 artifact。
+
+```bash
+python .github/scripts/check-windows-native-evidence.py --backend production
+python .github/scripts/check-windows-native-evidence.py --backend default --directory target/windows-default
+python -m unittest discover -s .github/scripts -p 'test_windows_native_evidence.py'
+```
+
+门禁不能把 Windows 的 `hostResources UNKNOWN` 提升为完整清理保证；非 Windows 本地测试跳过原生用例也不能满足这两条原生门禁。

@@ -28,6 +28,12 @@ public final class TestEvidence {
         values.setProperty("read.policy", readiness.readPolicy().name());
         values.setProperty("network.policy", readiness.networkPolicy().name());
         values.setProperty("probe.ready", Boolean.toString(readiness.ready()));
+        if (info.platform() == io.github.sandboxdemo.api.SandboxPlatform.WINDOWS) {
+            values.setProperty(
+                    "windows.token.elevated",
+                    Boolean.toString(
+                            com.sun.jna.platform.win32.Advapi32Util.isCurrentProcessElevated()));
+        }
         Path directory = Paths.get("target", "backend-evidence");
         Files.createDirectories(directory);
         try (java.io.OutputStream out =

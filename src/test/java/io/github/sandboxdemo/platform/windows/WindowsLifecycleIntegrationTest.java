@@ -11,9 +11,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.*;
 import org.junit.jupiter.api.io.TempDir;
 
-/** 专用账户后端的强制 Job 回收验收，不将异常转为跳过。 */
+/** 默认/专用账户后端共用的强制 Job 回收验收，不将异常转为跳过。 */
 @EnabledOnOs(OS.WINDOWS)
-@EnabledIfEnvironmentVariable(named = "SANDBOX_WINDOWS_PRODUCTION_TEST", matches = "1")
+@EnabledIf("io.github.sandboxdemo.platform.windows.WindowsNativeTestSupport#enabled")
 class WindowsLifecycleIntegrationTest {
     @TempDir Path workspace;
 
@@ -33,10 +33,7 @@ class WindowsLifecycleIntegrationTest {
     }
 
     private SandboxClient client() {
-        return SandboxClient.builder()
-                .windowsProductionHome(WindowsSandboxInstallation.defaultHome())
-                .cleanupGrace(Duration.ofSeconds(2))
-                .build();
+        return WindowsNativeTestSupport.client();
     }
 
     private SandboxRequest request(Duration timeout, byte[] input) {
@@ -56,8 +53,7 @@ class WindowsLifecycleIntegrationTest {
     }
 
     @Test
-    void runningCancellationConfirmsOuterJobEmptyButDoesNotInventAclCleanupEvidence()
-            throws Exception {
+    void runningCancellationConfirmsJobEmptyButDoesNotInventAclCleanupEvidence() throws Exception {
         java.util.logging.Logger logger =
                 java.util.logging.Logger.getLogger(WindowsExecutionSupport.class.getName());
         java.util.logging.Level oldLevel = logger.getLevel();
@@ -110,7 +106,7 @@ class WindowsLifecycleIntegrationTest {
     }
 
     @Test
-    void workerTimeoutReturnsWithinSharedDeadlineAndCleanupGrace() throws Exception {
+    void timeoutReturnsWithinSharedDeadlineAndCleanupGrace() throws Exception {
         ThreadPoolExecutor workers = pool();
         try {
             long started = System.nanoTime();
