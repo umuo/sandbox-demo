@@ -105,6 +105,8 @@ jobs:
         if: always()
         with:
           python-version: '3.12'
+      - name: Compile public documentation examples with Java 8 APIs
+        run: python .github/scripts/check-doc-examples.py
       - name: Summarize runtime versions and test counts
         if: always()
         run: python .github/scripts/collect-test-evidence.py

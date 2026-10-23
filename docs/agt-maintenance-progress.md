@@ -1,8 +1,10 @@
 # AGT 接入维护进度
 
-本页记录 2026-10-14 开始的维护迭代。原始需求见 [Java AGT 接入需求](agt-integration-requirements.md)；该文档保留为实施前证据，不以修改旧观察替代修复验收。当前改动未发布；前两阶段及跨平台修复已推送，最新确认的基线 CI 为 [015600d / Actions #27](https://github.com/umuo/sandbox-demo/actions/runs/38523189534)，11 组平台/JDK 任务及文档构建通过。
+本页按时间顺序保留 2026-10-14 起的实施观察与验收证据。每一阶段的“当前”“未发布”“尚缺”只描述当时状态，不代表后续阶段或当前分支。当前实现请先看 [SDK 当前能力与限制](SDK.md#current-capabilities)，发布记录见 [制品发布](PUBLISHING.md)，后续工作见 [JDK 8 优化路线](optimization-roadmap-jdk8.md)。原始需求见 [Java AGT 接入需求](agt-integration-requirements.md)；保留历史观察，不用覆盖旧记录替代修复验收。
 
-## 当前实施进度
+## 初始阶段进度快照（2026-10-14）
+
+以下表格及紧接的 macOS 记录为早期阶段快照。该阶段改动当时未发布；前两阶段及跨平台修复已推送，当时确认的基线 CI 为 [015600d / Actions #27](https://github.com/umuo/sandbox-demo/actions/runs/38523189534)，11 组平台/JDK 任务及文档构建通过。后续 SDK-03 至 SDK-07 的完成情况按下文章节阅读。
 
 | 需求 | 当前进度 | 尚缺能力 |
 |---|---|---|

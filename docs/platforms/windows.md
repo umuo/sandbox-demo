@@ -171,13 +171,23 @@ D:\project\src\test\java     M
 - 写 `D:\project\README.md`：第二次检查失败；
 - 写 `D:\project\src\test\java\DemoTest.java`：两个检查都成功。
 
-示例策略：
+示例策略（Java 8，`project`、`powershell` 与 `command` 由宿主提供）：
+
+```java
+import io.github.sandboxdemo.api.*;
+import io.github.sandboxdemo.sdk.*;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.time.Duration;
+import java.util.*;
+import java.util.concurrent.*;
+```
 
 ```java
 SandboxRequest request = SandboxRequest.builder(project, powershell)
         .arguments("-NoProfile", "-NonInteractive", "-Command", command)
         .readOnlyWorkingDirectory()
-        .readableRoot(Path.of(System.getenv("USERPROFILE"), "AppData"))
+        .readableRoot(Paths.get(System.getenv("USERPROFILE"), "AppData"))
         .writableRoot(project.resolve("src/test/java"))
         .readPolicy(ReadPolicy.HOST)
         .network(NetworkPolicy.ALLOW)

@@ -4,6 +4,18 @@
 
 `SandboxRequest` 表示一次不可变执行。理解它最简单的方式是把字段分成四组：命令、文件、网络和资源。
 
+以下 Java 示例以 JDK 8 为最低版本。片段省略的公共 import 如下；`modelCommand`、工作目录和可信工具路径等由宿主提供。片段用于展示 API，实际执行前须创建声明目录并检查后端能力。
+
+```java
+import io.github.sandboxdemo.api.*;
+import io.github.sandboxdemo.sdk.*;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.time.Duration;
+import java.util.*;
+import java.util.concurrent.*;
+```
+
 ```java
 SandboxRequest request = SandboxRequest.builder(workspace, executable)
         .arguments(arguments)
@@ -183,9 +195,9 @@ Builder 默认值按平台解析：Windows 使用 `ReadPolicy.HOST + NetworkPoli
 ## Windows 选择性写入示例
 
 ```java
-Path project = Path.of("D:\\projects\\my-agent").toRealPath();
+Path project = Paths.get("D:\\projects\\my-agent").toRealPath();
 Path tests = project.resolve("src/test/java").toRealPath();
-Path appData = Path.of(System.getenv("USERPROFILE"), "AppData").toRealPath();
+Path appData = Paths.get(System.getenv("USERPROFILE"), "AppData").toRealPath();
 
 SandboxRequest request = SandboxRequest.builder(project, powershell)
         .arguments("-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command)

@@ -2,13 +2,15 @@
 
 ## Maven 坐标
 
-在 SDK 仓库执行：
+最低运行版本和源码/API 基线为 Java 8；构建要求 JDK 8+、Maven 3.6.3+，CI 矩阵为 JDK 8/17/21。现代 JDK 的 `release=8` 编译不能代替实际 JDK 8 测试。本文 Java 片段均使用 Java 8 API。
+
+验证本地 SDK 修改时，在仓库执行：
 
 ```bash
 mvn clean install
 ```
 
-Agent 项目添加：
+这会安装 `1.0.0-SNAPSHOT`，仓库内 consumer 使用该版本。引用已发布 alpha.2 的 Agent 项目添加：
 
 ```xml
 <dependency>
@@ -19,6 +21,22 @@ Agent 项目添加：
 ```
 
 生产发布到 Nexus、Artifactory 或 Maven Central 时，应把版本改为不可变的正式版本，同时发布主 JAR、POM、sources 和 javadoc。Agent 不应使用 `-SNAPSHOT` 作为生产依赖。
+
+## 当前能力与限制 {#current-capabilities}
+
+本表按 `jdk1.8` 当前实现整理；历史阶段的“尚缺能力”不作为当前功能清单。已发布版本与源码对应关系见 [制品发布](PUBLISHING.md)，原生测试的具体平台、JDK 和跳过数见 [历史维护记录](agt-maintenance-progress.md)。
+
+| 能力 | 当前实现 | 仍需注意的限制 |
+|---|---|---|
+| 请求预检 | 内建 Linux/macOS、Windows 默认与专用账户后端支持 `readiness/validate` | 只运行可信探针；不是目标工具链完整验证或持久授权 |
+| 异步生命周期 | 有界工作池、取消、绝对期限、独立清理快照 | 有界交付不等于后台已回收；macOS processes、Windows hostResources 可为 UNKNOWN |
+| 输出 | 每流/聚合额度、TRUNCATE/TERMINATE、RAW/RETAINED 回调 | RAW 回调可观察超过保留额度的输出；用户回调可以阻塞 |
+| 环境与工作区 | strict preset、固定工具路径、私有 HOME/cache/temp、可观察清理 | 输入供应及工具不可变性由宿主保障；不扩大 Windows 读取隔离 |
+| 资源准入 | 显式隔离等级与硬限额能力校验；Windows Job 内存/进程数限制 | 当前 CPU/磁盘及 Linux/macOS 请求级硬限额不支持，要求时失败关闭 |
+| Windows 文件/网络 | 默认普通用户 restricted token；可选专用账户 Firewall 后端 | 仅 HOST 读取、enforcement PARTIAL；默认后端拒绝 DENY 网络策略 |
+| 错误与诊断 | 错误码、阶段、默认字符串脱敏、显式调试入口 | 调试正文仍需宿主妥善处理；旧自定义 SPI 新能力默认未知或不支持 |
+
+后续改进与验收安排见 [JDK 8 优化路线](optimization-roadmap-jdk8.md)。
 
 ## 公共 API
 
@@ -43,6 +61,18 @@ io.github.sandboxdemo.sdk
 ## Agent 服务封装
 
 `SandboxClient` 可以作为单例使用；执行方法没有共享的可变策略状态，可以由多个 Agent 请求并发调用。默认 Windows 后端不需要 setup。只有显式启用专用账户后端时，setup/uninstall 才必须放在维护窗口且不能与执行并发。
+
+以下 Java 示例以 JDK 8 为最低版本。片段省略的公共 import 如下；`modelCommand`、工作目录和可信工具路径等由宿主提供。片段用于展示 API，实际执行前须创建声明目录并检查后端能力。
+
+```java
+import io.github.sandboxdemo.api.*;
+import io.github.sandboxdemo.sdk.*;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.time.Duration;
+import java.util.*;
+import java.util.concurrent.*;
+```
 
 ```java
 import io.github.sandboxdemo.api.*;
@@ -116,10 +146,10 @@ Builder 默认把 working directory 同时作为 readable 和 writable root。�
 可以只撤销默认写授权；若仅允许生成或修改测试代码，再声明更窄的 writable root：
 
 ```java
-Path project = Path.of("D:\\projects\\my-agent").toRealPath();
+Path project = Paths.get("D:\\projects\\my-agent").toRealPath();
 Path testSources = project.resolve("src\\test\\java").toRealPath();
-Path appData = Path.of(System.getenv("USERPROFILE"), "AppData").toRealPath();
-Path powershell = Path.of(
+Path appData = Paths.get(System.getenv("USERPROFILE"), "AppData").toRealPath();
+Path powershell = Paths.get(
         System.getenv().getOrDefault("SystemRoot", "C:\\Windows"),
         "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
 

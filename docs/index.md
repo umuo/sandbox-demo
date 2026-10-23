@@ -38,8 +38,20 @@ flowchart TD
 
 ## 最小 SDK 示例
 
+以下 Java 示例以 JDK 8 为最低版本。片段省略的公共 import 如下；`modelCommand`、工作目录和可信工具路径等由宿主提供。片段用于展示 API，实际执行前须创建声明目录并检查后端能力。
+
 ```java
-Path workspace = Path.of("/srv/agent/workspace");
+import io.github.sandboxdemo.api.*;
+import io.github.sandboxdemo.sdk.*;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.time.Duration;
+import java.util.*;
+import java.util.concurrent.*;
+```
+
+```java
+Path workspace = Paths.get("/srv/agent/workspace");
 
 SandboxRequest request = SandboxRequest.builder(workspace, "/bin/sh")
         .arguments("-c", modelGeneratedCommand)
@@ -62,6 +74,8 @@ Windows Builder 自动使用 `ReadPolicy.HOST + NetworkPolicy.ALLOW`，默认不
 4. 选择对应平台：[Windows](platforms/windows.md)、[Linux](platforms/linux.md) 或 [macOS](platforms/macos.md)。
 5. 上线前阅读 [安全边界与威胁模型](security-boundaries.md)。
 6. 遇到缩写或系统名词时查 [术语表](glossary.md)。
+
+后续维护计划见 [JDK 8 分支优化路线](optimization-roadmap-jdk8.md)，包含当前代码观察、优先级、实施顺序与验收标准。
 
 ## 非目标
 

@@ -54,16 +54,18 @@ python3 -m venv .venv-docs
 
 入口见 [docs/index.md](docs/index.md)，站点开发说明见 [docs/site-development.md](docs/site-development.md)。
 
-Java AGT 接入的已复现问题、SDK 维护优先级与验收条件见 [接入需求与维护验收](docs/agt-integration-requirements.md)。
+当前能力与限制见 [SDK 当前能力](docs/SDK.md#current-capabilities)，后续计划见 [JDK 8 优化路线](docs/optimization-roadmap-jdk8.md)。[接入需求与维护验收](docs/agt-integration-requirements.md) 和 [维护进度](docs/agt-maintenance-progress.md) 保留历史观察与分阶段验收证据。
 
 ## 构建
+
+SDK 最低运行版本和源码/API 基线均为 Java 8。构建要求 JDK 8+、Maven 3.6.3+；CI 验证实际 JDK 8、17、21。较新 JDK 通过 `release=8` 编译不等价于真实 JDK 8 运行验收。格式化器由 POM 根据构建 JDK 选择，提交前运行 `mvn verify`。
 
 ```bash
 mvn clean verify
 mvn package
 ```
 
-`verify` 会执行测试、Maven/Java 版本门禁、Javadoc 和 google-java-format 检查。执行 `mvn install` 后，Agent 项目可以直接通过 Maven 引用：
+`verify` 会执行测试、Maven/Java 版本门禁、Javadoc 和 google-java-format 检查。下列坐标引用已发布的 alpha.2；本地 `mvn install` 安装的是 `1.0.0-SNAPSHOT`，验证本地修改时应使用该 SNAPSHOT 版本。
 
 ```xml
 <dependency>
@@ -114,6 +116,18 @@ SANDBOX_RUN_PLATFORM_INTEGRATION=1 mvn test
 
 要求 Windows 10/11、NTFS、64 位 JDK 8+。普通用户进程直接调用即可，不需要管理员终端、setup、本地账户、`Log on locally` 权限或 Firewall 规则：
 
+以下 Java 示例以 JDK 8 为最低版本。片段省略的公共 import 如下；`modelCommand`、工作目录和可信工具路径等由宿主提供。片段用于展示 API，实际执行前须创建声明目录并检查后端能力。
+
+```java
+import io.github.sandboxdemo.api.*;
+import io.github.sandboxdemo.sdk.*;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.time.Duration;
+import java.util.*;
+import java.util.concurrent.*;
+```
+
 ```java
 SandboxClient client = SandboxClient.create();
 SandboxResult result = client.execute(request);
@@ -162,7 +176,7 @@ java -jar target\agent-sandbox-sdk-1.0.0-SNAPSHOT-all.jar uninstall-windows
 Linux/macOS 严格读取示例：
 
 ```java
-Path workspace = Path.of("/srv/agent/workspace");
+Path workspace = Paths.get("/srv/agent/workspace");
 
 SandboxClient client = SandboxClient.create();
 SandboxRuntimeStatus status = client.status();
@@ -172,7 +186,7 @@ if (!status.ready()) {
 
 SandboxRequest request = SandboxRequest.builder(workspace, "/bin/sh")
         .arguments("-c", "npm test")
-        .readableRoot(Path.of("/srv/agent/input"))
+        .readableRoot(Paths.get("/srv/agent/input"))
         .writableRoot(workspace.resolve("generated"))
         .protect(workspace.resolve(".git"))
         .readPolicy(ReadPolicy.DECLARED_ONLY)
@@ -187,12 +201,12 @@ SandboxResult result = client.execute(request);
 Windows 零配置 workspace-write 示例：
 
 ```java
-Path workspace = Path.of("D:\\agent-workspace");
+Path workspace = Paths.get("D:\\agent-workspace");
 String systemRoot = System.getenv().getOrDefault("SystemRoot", "C:\\Windows");
 
 SandboxRequest request = SandboxRequest.builder(
                 workspace,
-                Path.of(systemRoot, "System32", "cmd.exe").toString())
+                Paths.get(systemRoot, "System32", "cmd.exe").toString())
         .arguments("/d", "/s", "/c", "mvn test")
         .protect(workspace.resolve(".git"))
         .timeout(Duration.ofSeconds(60))
@@ -224,10 +238,10 @@ SandboxRequest request = SandboxRequest.builder(project, powershell)
 Windows 项目根只读、测试源码可写、AppData 可读、网络不受 SDK 限制的示例：
 
 ```java
-Path project = Path.of("D:\\projects\\my-agent").toRealPath();
+Path project = Paths.get("D:\\projects\\my-agent").toRealPath();
 Path testSources = project.resolve("src\\test\\java").toRealPath();
-Path appData = Path.of(System.getenv("USERPROFILE"), "AppData").toRealPath();
-String powershell = Path.of(
+Path appData = Paths.get(System.getenv("USERPROFILE"), "AppData").toRealPath();
+String powershell = Paths.get(
         System.getenv().getOrDefault("SystemRoot", "C:\\Windows"),
         "System32", "WindowsPowerShell", "v1.0", "powershell.exe").toString();
 

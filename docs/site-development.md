@@ -46,6 +46,21 @@ Windows：
 
 输出到 `site/`。`site/` 是生成物，不应作为手写文档编辑。
 
+## Java 8 示例编译检查
+
+Java 片段以 Java 8 为默认 API 基线；正文应给出公共 import，宿主输入如命令、工作区和可信工具路径在片段说明中注明。可运行的完整案例继续放在 `examples/sdk-consumer`，不要在文档中另行维护 SDK 实现副本。
+
+```bash
+mvn verify
+python3 .github/scripts/check-doc-examples.py
+mvn -DskipTests install
+mvn -f examples/sdk-consumer/pom.xml clean package
+```
+
+先指定所需 JDK 的 `JAVA_HOME`。检查脚本直接提取 README、首页、SDK 指南、策略模型和 Windows 平台页的 Java fenced code，使用构建出的真实 SDK 类编译。它仅补充宿主输入字段，不执行片段、不伪造 SDK API。实际 JDK 8 使用自身 API 编译，较新 JDK 使用 `--release 8`；CI 在现有各平台/JDK 任务中执行此检查。完整类之外的片段共享同页列出的 import。
+
+编译通过不代表目标命令可以在任意宿主执行；路径、身份、后端能力和清理保证仍需对应原生验收。新增包含 Java 代码的文档页时，同步更新 `.github/scripts/check-doc-examples.py` 的文档清单及宿主输入。
+
 ## 目录结构
 
 ```text
