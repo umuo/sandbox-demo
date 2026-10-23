@@ -189,3 +189,5 @@ O-01 已完成文档与编译门禁改进：README、首页、SDK 指南、策�
 首轮准备阶段的 C# 探针路径问题已修正为 Resolve-Path/Join-Path；Maven Central 429 限流通过 artifact 缓存种子和普通用户离线执行路径处理。`21280af` 对应原生测试随后报告默认临时目录 `CreateFileW(path lease)` 返回 Win32=5，多项执行未能启动。代码检查发现 `PrivateDirectories` 使用 `user.name` 查找 ACL 主体；该属性可由 `-D` 覆盖，Windows JVM 还可能从继承的 USERNAME 初始化它，不能作为身份授权依据。
 
 修复改为查询真实进程 token 的账户，再配置宿主私有 DACL；不增加 Everyone/Administrators 授权，也不放宽路径租约。新增普通用户原生回归将 `user.name` 设为 SYSTEM，检查 DACL 仍只授予真实 token 用户，并验证合成文件读写/删除；此方法加入强制门禁。具体修复结果仍以对应新提交的三个 JDK 原生 CI 为准。
+
+`cd95d22` 的三个普通用户 JDK 任务不再报告私有目录访问拒绝，身份伪造回归通过；剩余两项旧测试错误地把 CMD 的删除失败等同于非零退出码（实测 stderr 为 Access is denied 而 exitCode=0）。删除/重命名验收改为校验命令已执行、文件内容不变、重命名目标不存在，并保留允许修改和允许删除的对照；PowerShell 的 Stop 语义继续要求非零退出。没有更改权限策略或减少必测方法。最终通过状态仍以修正提交的完整 CI 记录为准。

@@ -1,5 +1,7 @@
 package io.github.sandboxdemo.platform.windows;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -86,18 +88,33 @@ class WindowsRestrictedTokenSandboxRunnerTest {
                                                 + "\"")));
         assertTrue(writeResult.successful(), failureDetails(writeResult));
         assertTrue(Files.exists(created));
+        byte[] modified = Files.readAllBytes(existing);
+        assertEquals(
+                "modified", new String(modified, java.nio.charset.StandardCharsets.UTF_8).trim());
 
         SandboxResult deleteResult =
-                runner.execute(SandboxRequest.of(policy, cmd("del /f /q \"" + existing + "\"")));
-        assertFalse(deleteResult.successful());
-        assertTrue(Files.exists(existing));
+                runner.execute(
+                        SandboxRequest.of(
+                                policy,
+                                cmd("del /f /q \"" + existing + "\" & echo delete-attempted")));
+        // CMD DEL can print Access denied yet return zero. Verify the protected object itself.
+        assertFalse(deleteResult.timedOut(), failureDetails(deleteResult));
+        assertTrue(deleteResult.stdoutUtf8().contains("delete-attempted"));
+        assertArrayEquals(modified, Files.readAllBytes(existing), failureDetails(deleteResult));
 
         SandboxResult renameResult =
                 runner.execute(
                         SandboxRequest.of(
-                                policy, cmd("move /y \"" + existing + "\" \"" + renamed + "\"")));
-        assertFalse(renameResult.successful());
-        assertTrue(Files.exists(existing));
+                                policy,
+                                cmd(
+                                        "move /y \""
+                                                + existing
+                                                + "\" \""
+                                                + renamed
+                                                + "\" & echo rename-attempted")));
+        assertFalse(renameResult.timedOut(), failureDetails(renameResult));
+        assertTrue(renameResult.stdoutUtf8().contains("rename-attempted"));
+        assertArrayEquals(modified, Files.readAllBytes(existing), failureDetails(renameResult));
         assertFalse(Files.exists(renamed));
 
         SandboxResult powershellDeleteResult =
@@ -109,7 +126,7 @@ class WindowsRestrictedTokenSandboxRunnerTest {
                                                 + quote(powershellTarget)
                                                 + "' -Force")));
         assertFalse(powershellDeleteResult.successful());
-        assertTrue(Files.exists(powershellTarget));
+        assertArrayEquals(new byte[] {2}, Files.readAllBytes(powershellTarget));
     }
 
     @Test
@@ -129,9 +146,13 @@ class WindowsRestrictedTokenSandboxRunnerTest {
 
         SandboxResult cmdDelete =
                 runner.execute(
-                        SandboxRequest.of(policy, cmd("del /f /q \"" + readOnlyFile + "\"")));
-        assertFalse(cmdDelete.successful(), failureDetails(cmdDelete));
-        assertTrue(Files.exists(readOnlyFile));
+                        SandboxRequest.of(
+                                policy,
+                                cmd("del /f /q \"" + readOnlyFile + "\" & echo delete-attempted")));
+        assertFalse(cmdDelete.timedOut(), failureDetails(cmdDelete));
+        assertTrue(cmdDelete.stdoutUtf8().contains("delete-attempted"));
+        assertArrayEquals(
+                new byte[] {1}, Files.readAllBytes(readOnlyFile), failureDetails(cmdDelete));
 
         SandboxResult powershellDelete =
                 runner.execute(
@@ -142,7 +163,7 @@ class WindowsRestrictedTokenSandboxRunnerTest {
                                                 + quote(powershellTarget)
                                                 + "' -Force")));
         assertFalse(powershellDelete.successful(), failureDetails(powershellDelete));
-        assertTrue(Files.exists(powershellTarget));
+        assertArrayEquals(new byte[] {2}, Files.readAllBytes(powershellTarget));
 
         SandboxResult writableDelete =
                 runner.execute(
