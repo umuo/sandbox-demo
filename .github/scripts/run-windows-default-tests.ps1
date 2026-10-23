@@ -18,12 +18,20 @@ try {
     $repository = Join-Path $root 'repository'
     $temp = Join-Path $root 'temp'
     New-Item -ItemType Directory -Path $temp -Force | Out-Null
+    # Seed artifacts only, never runner settings/credentials. Each account still writes its own copy.
+    $cachedArtifacts = Join-Path $env:USERPROFILE '.m2/repository'
+    if (Test-Path $cachedArtifacts) {
+        & robocopy.exe $cachedArtifacts $repository /E /XD .locks /XF '*.lastUpdated' /NFL /NDL /NJH /NJS | Out-Null
+        if ($LASTEXITCODE -gt 7) { throw 'Could not seed isolated Maven artifact cache' }
+    }
     $maven = (Get-Command mvn.cmd).Source
     Push-Location $workspace
     try {
-        & $maven --batch-mode --no-transfer-progress "-Dmaven.repo.local=$repository" -DskipTests test |
+        # A pure command-line unit test primes Surefire as well, so the standard-user run is offline.
+        & $maven --batch-mode --no-transfer-progress "-Dmaven.repo.local=$repository" '-Dtest=WindowsCommandLineTest' test |
             Tee-Object -FilePath (Join-Path $root 'build.log')
         if ($LASTEXITCODE -ne 0) { throw 'Default acceptance compilation failed' }
+        Remove-Item -LiteralPath 'target/surefire-reports' -Recurse -Force
         $compiler = Join-Path $env:WINDIR 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
         $probeSource = (Resolve-Path '.github/scripts/resource-probe.cs').Path
         $probeDestination = Join-Path (Get-Location) 'target/resource-probe.exe'
@@ -60,7 +68,7 @@ set "SANDBOX_WINDOWS_DEFAULT_ACCEPTANCE=1"
 set "SANDBOX_RUN_RESOURCE_INTEGRATION=1"
 set "SANDBOX_RUN_ENVIRONMENT_INTEGRATION=1"
 set "SANDBOX_SYNTHETIC_PARENT_SECRET=synthetic-parent-secret-must-not-inherit"
-call "$maven" --batch-mode --no-transfer-progress --settings "$emptySettings" "-Dmaven.repo.local=$repository" "-Dtest=$tests" test
+call "$maven" --offline --batch-mode --no-transfer-progress --settings "$emptySettings" "-Dmaven.repo.local=$repository" "-Dtest=$tests" test
 exit /b %ERRORLEVEL%
 "@ | Set-Content $entry -Encoding ascii
     $credential = [pscredential]::new("$env:COMPUTERNAME\$user", $password)

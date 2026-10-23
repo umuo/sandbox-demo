@@ -121,7 +121,7 @@ docs/
 
 现有 `test` 矩阵的 Windows 路径负责 elevated setup、专用账户后端及卸载；新增 `windows-default` 矩阵在临时 runner 上创建只属于 Users 的本地测试账户，以该真实普通用户运行默认后端。两条路径均覆盖 JDK 8/17/21，不通过降低默认后端的 elevated 拒绝要求来取得覆盖。
 
-普通用户脚本 `.github/scripts/run-windows-default-tests.ps1` 只导出已提交源码到随机 CI 目录，使用独立 Maven repository，不复制 `.git` 或 runner 用户缓存；账户密码仅用于本机登录，不写入脚本与证据。测试目录向该用户授予完整控制，供测试修改合成路径 ACL；没有向系统目录扩大写权限。脚本在 finally 中保存报告并清理账户、profile 与随机目录，超时会终止测试进程树。只在一次性 CI runner 执行该脚本。
+普通用户脚本 `.github/scripts/run-windows-default-tests.ps1` 只导出已提交源码到随机 CI 目录，使用独立 Maven repository，不复制 `.git` 或 runner 用户设置/凭据。可用的 Maven artifact 缓存仅作为独立 repository 的种子；准备阶段运行纯命令行单元测试以补齐 Surefire 依赖，移除准备阶段报告后，普通用户验收以 offline 模式执行。账户密码仅用于本机登录，不写入脚本与证据。测试目录向该用户授予完整控制，供测试修改合成路径 ACL；没有向系统目录扩大写权限。脚本在 finally 中保存报告并清理账户、profile 与随机目录，超时会终止测试进程树。只在一次性 CI runner 执行该脚本。
 
 共用的生命周期、输出、预检和资源用例由 `WindowsNativeTestSupport` 按显式环境选择后端：`SANDBOX_WINDOWS_DEFAULT_ACCEPTANCE=1` 选择默认后端，`SANDBOX_WINDOWS_PRODUCTION_TEST=1` 选择专用账户，两者不能同时设置。默认路径还验证普通用户 token、默认后端选择、写入/删除边界、策略拒绝和并发工作区独立性。管理员路径单独断言默认后端不能被 elevated 宿主启动。
 
