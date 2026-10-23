@@ -123,7 +123,7 @@ docs/
 
 普通用户脚本 `.github/scripts/run-windows-default-tests.ps1` 只导出已提交源码到随机 CI 目录，使用独立 Maven repository，不复制 `.git` 或 runner 用户设置/凭据。可用的 Maven artifact 缓存仅作为独立 repository 的种子；准备阶段运行纯命令行单元测试以补齐 Surefire 依赖，移除准备阶段报告后，普通用户验收以 offline 模式执行。账户密码仅用于本机登录，不写入脚本与证据。测试目录向该用户授予完整控制，供测试修改合成路径 ACL；没有向系统目录扩大写权限。脚本在 finally 中保存报告并清理账户、profile 与随机目录，超时会终止测试进程树。只在一次性 CI runner 执行该脚本。
 
-共用的生命周期、输出、预检和资源用例由 `WindowsNativeTestSupport` 按显式环境选择后端：`SANDBOX_WINDOWS_DEFAULT_ACCEPTANCE=1` 选择默认后端，`SANDBOX_WINDOWS_PRODUCTION_TEST=1` 选择专用账户，两者不能同时设置。默认路径还验证普通用户 token、默认后端选择、写入/删除边界、策略拒绝和并发工作区独立性。管理员路径单独断言默认后端不能被 elevated 宿主启动。
+共用的生命周期、输出、预检和资源用例由 `WindowsNativeTestSupport` 按显式环境选择后端：`SANDBOX_WINDOWS_DEFAULT_ACCEPTANCE=1` 选择默认后端，`SANDBOX_WINDOWS_PRODUCTION_TEST=1` 选择专用账户，两者不能同时设置。默认路径还验证普通用户 token、伪造 `user.name` 不改变私有目录 ACL 主体、默认后端选择、写入/删除边界、策略拒绝和并发工作区独立性。管理员路径单独断言默认后端不能被 elevated 宿主启动。
 
 `.github/scripts/windows-native-required.json` 列出必须执行成功的方法。门禁拒绝缺报告、缺方法、跳过、失败、重复、损坏 XML，以及后端或 token elevation 不匹配；新方法或重命名时应同步审查清单。JSON 证据记录 OS/JDK、身份种类、后端和执行/失败/跳过计数，不含请求正文。默认路径证据在 `target/windows-default/`，专用账户在 `target/`，分别上传 artifact。
 

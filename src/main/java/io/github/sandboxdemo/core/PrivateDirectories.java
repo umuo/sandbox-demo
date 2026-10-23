@@ -28,11 +28,7 @@ public final class PrivateDirectories {
             if (view == null) {
                 throw new IOException("private directory permissions are unsupported");
             }
-            UserPrincipal owner =
-                    directory
-                            .getFileSystem()
-                            .getUserPrincipalLookupService()
-                            .lookupPrincipalByName(System.getProperty("user.name"));
+            UserPrincipal owner = processPrincipal(directory);
             AclEntry entry =
                     AclEntry.newBuilder()
                             .setType(AclEntryType.ALLOW)
@@ -54,6 +50,33 @@ public final class PrivateDirectories {
                 failure.addSuppressed(cleanup);
             }
             throw failure;
+        }
+    }
+
+    private static UserPrincipal processPrincipal(Path directory) throws IOException {
+        if (OperatingSystem.current() != OperatingSystem.WINDOWS) {
+            return Files.getOwner(directory, LinkOption.NOFOLLOW_LINKS);
+        }
+        com.sun.jna.platform.win32.WinNT.HANDLEByReference token =
+                new com.sun.jna.platform.win32.WinNT.HANDLEByReference();
+        com.sun.jna.platform.win32.Kernel32 kernel = com.sun.jna.platform.win32.Kernel32.INSTANCE;
+        if (!com.sun.jna.platform.win32.Advapi32.INSTANCE.OpenProcessToken(
+                kernel.GetCurrentProcess(), com.sun.jna.platform.win32.WinNT.TOKEN_QUERY, token)) {
+            throw new IOException("failed to query private directory host identity");
+        }
+        try {
+            // user.name can be supplied with -D or inherited through USERNAME on Windows.
+            // Only the real process token can identify the host that must retain directory access.
+            com.sun.jna.platform.win32.Advapi32Util.Account account =
+                    com.sun.jna.platform.win32.Advapi32Util.getTokenAccount(token.getValue());
+            return directory
+                    .getFileSystem()
+                    .getUserPrincipalLookupService()
+                    .lookupPrincipalByName(account.fqn);
+        } finally {
+            if (!kernel.CloseHandle(token.getValue())) {
+                throw new IOException("failed to close private directory identity token");
+            }
         }
     }
 

@@ -179,6 +179,13 @@ O-01 已完成文档与编译门禁改进：README、首页、SDK 指南、策�
 
 新增独立 `windows-default` CI 矩阵（JDK 8/17/21），在一次性 runner 上以新建普通用户运行默认后端，不执行 production setup；原 Windows 矩阵保留 elevated setup、专用账户验收与 uninstall。生命周期、输出额度、真实策略预检、资源额度和严格环境场景复用测试主体并显式选择后端，默认路径另验证身份、写入/删除权限、策略拒绝和并发提交独立性，管理员路径验证默认后端拒绝 elevated 调用。
 
-新增必测方法清单和证据门禁：默认后端要求 16 个方法成功，专用账户要求 10 个。缺报告/方法、跳过、失败/错误、重复方法、损坏 XML，以及后端/token elevation 不符均不能取得通过。证据分开上传，包含 OS/JDK、身份种类、后端、实际执行与跳过数量。账户、profile、独立源码和 Maven repository 仅在随机 CI 目录内临时供应并清理；实现与复现命令见 [文档站点开发](site-development.md)。
+新增必测方法清单和证据门禁：默认后端要求 17 个方法成功，专用账户要求 10 个。缺报告/方法、跳过、失败/错误、重复方法、损坏 XML，以及后端/token elevation 不符均不能取得通过。证据分开上传，包含 OS/JDK、身份种类、后端、实际执行与跳过数量。账户、profile、独立源码和 Maven repository 仅在随机 CI 目录内临时供应并清理；实现与复现命令见 [文档站点开发](site-development.md)。
 
 本地 Zulu JDK 8u462 `verify` 通过：147 项、0 失败、0 错误、38 跳过；其中新增 Windows 原生用例在 Mac 上跳过，不算 Windows 验收通过。证据门禁 7 组正反测试、26 段文档片段编译、工作流 YAML/方法清单检查和严格文档构建通过。Windows 原生结果须以本轮提交对应的远端 CI 为准；O-01 提交 `79a9ef3` 的远端工作流已确认成功，不能替代本阶段验证。
+
+
+### 普通用户原生门禁发现的身份错误
+
+首轮准备阶段的 C# 探针路径问题已修正为 Resolve-Path/Join-Path；Maven Central 429 限流通过 artifact 缓存种子和普通用户离线执行路径处理。`21280af` 对应原生测试随后报告默认临时目录 `CreateFileW(path lease)` 返回 Win32=5，多项执行未能启动。代码检查发现 `PrivateDirectories` 使用 `user.name` 查找 ACL 主体；该属性可由 `-D` 覆盖，Windows JVM 还可能从继承的 USERNAME 初始化它，不能作为身份授权依据。
+
+修复改为查询真实进程 token 的账户，再配置宿主私有 DACL；不增加 Everyone/Administrators 授权，也不放宽路径租约。新增普通用户原生回归将 `user.name` 设为 SYSTEM，检查 DACL 仍只授予真实 token 用户，并验证合成文件读写/删除；此方法加入强制门禁。具体修复结果仍以对应新提交的三个 JDK 原生 CI 为准。

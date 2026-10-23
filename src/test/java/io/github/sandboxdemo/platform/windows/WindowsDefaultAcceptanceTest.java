@@ -6,6 +6,7 @@ import com.sun.jna.platform.win32.Advapi32Util;
 import io.github.sandboxdemo.api.*;
 import io.github.sandboxdemo.sdk.SandboxClient;
 import java.nio.file.*;
+import java.nio.file.attribute.*;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.*;
@@ -49,6 +50,50 @@ class WindowsDefaultAcceptanceTest {
         assertEquals(SandboxPhase.ADMISSION, readiness.error().get().phase());
         assertEquals(SandboxCleanupState.NOT_REQUIRED, readiness.cleanup().processes());
         assertFalse(Files.exists(root.resolve("target-marker")));
+    }
+
+    @Test
+    void privateDirectoryUsesTokenIdentityWhenUserNameIsSpoofed() throws Exception {
+        String previous = System.getProperty("user.name");
+        Path directory = null;
+        UserPrincipal expected =
+                root.getFileSystem()
+                        .getUserPrincipalLookupService()
+                        .lookupPrincipalByName(Advapi32Util.getUserName());
+        try {
+            System.setProperty("user.name", "SYSTEM");
+            directory = io.github.sandboxdemo.core.PrivateDirectories.create(root, "identity-");
+            List<AclEntry> acl =
+                    Files.getFileAttributeView(directory, AclFileAttributeView.class).getAcl();
+            assertFalse(acl.isEmpty());
+            for (AclEntry entry : acl) {
+                if (entry.type() == AclEntryType.ALLOW) {
+                    assertEquals(expected, entry.principal(), "DACL must name the real token user");
+                }
+            }
+            Path canary = Files.write(directory.resolve("canary"), new byte[] {42});
+            assertArrayEquals(new byte[] {42}, Files.readAllBytes(canary));
+            Files.delete(canary);
+        } finally {
+            if (previous == null) {
+                System.clearProperty("user.name");
+            } else {
+                System.setProperty("user.name", previous);
+            }
+            if (directory != null) {
+                // Restore synthetic permissions even if the regression returns an incorrect DACL.
+                AclEntry owner =
+                        AclEntry.newBuilder()
+                                .setType(AclEntryType.ALLOW)
+                                .setPrincipal(expected)
+                                .setPermissions(EnumSet.allOf(AclEntryPermission.class))
+                                .setFlags(AclEntryFlag.DIRECTORY_INHERIT, AclEntryFlag.FILE_INHERIT)
+                                .build();
+                Files.getFileAttributeView(directory, AclFileAttributeView.class)
+                        .setAcl(Collections.singletonList(owner));
+                assertTrue(io.github.sandboxdemo.core.PrivateDirectories.removeTree(directory));
+            }
+        }
     }
 
     @Test

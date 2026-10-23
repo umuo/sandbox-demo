@@ -29,6 +29,7 @@
     ],
     "WindowsDefaultAcceptanceTest": [
       "acceptanceUsesRealStandardUserAndDefaultBackend",
+      "privateDirectoryUsesTokenIdentityWhenUserNameIsSpoofed",
       "unsupportedNetworkPolicyFailsBeforeTargetStarts",
       "concurrentExecutionsKeepWorkspacesAndCleanupIndependent"
     ]
