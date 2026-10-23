@@ -21,7 +21,8 @@ try {
     $maven = (Get-Command mvn.cmd).Source
     Push-Location $workspace
     try {
-        & $maven --batch-mode --no-transfer-progress "-Dmaven.repo.local=$repository" -DskipTests test
+        & $maven --batch-mode --no-transfer-progress "-Dmaven.repo.local=$repository" -DskipTests test |
+            Tee-Object -FilePath (Join-Path $root 'build.log')
         if ($LASTEXITCODE -ne 0) { throw 'Default acceptance compilation failed' }
         $compiler = Join-Path $env:WINDIR 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
         & $compiler /nologo /target:exe /platform:x64 "/out:$workspace/target/resource-probe.exe" "$workspace/.github/scripts/resource-probe.cs"
@@ -71,6 +72,11 @@ exit /b %ERRORLEVEL%
     $process.WaitForExit()
     $exitCode = $process.ExitCode
     if ($null -eq $exitCode) { throw 'Standard-user process exit status is unavailable' }
+} catch {
+    $detail = "Standard-user acceptance: $($_.Exception.Message) (script line $($_.InvocationInfo.ScriptLineNumber))"
+    $detail = $detail.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+    Write-Output "::error::$detail"
+    throw
 } finally {
     if ($null -ne $process -and -not $process.HasExited) {
         & taskkill.exe /PID $process.Id /T /F | Out-Null
@@ -83,6 +89,26 @@ exit /b %ERRORLEVEL%
     foreach ($name in @('stdout.log', 'stderr.log')) {
         $path = Join-Path $root $name
         if (Test-Path $path) { Copy-Item $path $evidence -Force }
+    }
+    $reports = Join-Path $evidence 'surefire-reports'
+    if (Test-Path $reports) {
+        Get-ChildItem $reports -Filter 'TEST-*.xml' | ForEach-Object {
+            [xml]$report = Get-Content -LiteralPath $_.FullName -Raw
+            foreach ($case in $report.SelectNodes('//testcase[failure or error]')) {
+                $failure = $case.SelectSingleNode('failure|error')
+                $message = "$($case.classname).$($case.name): $($failure.GetAttribute('message'))"
+                if ($message.Length -gt 2000) { $message = $message.Substring(0, 2000) }
+                $message = $message.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+                Write-Output "::error::$message"
+            }
+        }
+    }
+    $buildLog = Join-Path $root 'build.log'
+    if (Test-Path $buildLog) {
+        Get-Content $buildLog | Where-Object { $_ -match '^\[ERROR\]' } | Select-Object -First 8 | ForEach-Object {
+            $message = $_.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Output "::error::$message"
+        }
     }
     try {
         if ($created) {
