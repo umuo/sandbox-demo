@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import io.github.sandboxdemo.TestEvidence;
 import io.github.sandboxdemo.api.*;
 import io.github.sandboxdemo.sdk.SandboxClient;
+import io.github.sandboxdemo.sdk.SandboxExecutionBudget;
 import java.nio.file.*;
 import java.time.Duration;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -72,6 +73,29 @@ class WindowsReadinessIntegrationTest {
         assertEquals(SandboxErrorCode.POLICY_UNSUPPORTED, readiness.error().get().code());
         assertEquals(SandboxPhase.ADMISSION, readiness.error().get().phase());
         assertEquals(SandboxCleanupState.NOT_REQUIRED, readiness.cleanup().processes());
+        assertFalse(Files.exists(workspace.resolve("caller-target-marker")));
+    }
+
+    @Test
+    void invalidPathPreparationDoesNotLeakAdmissionCapacity() throws Exception {
+        SandboxExecutionBudget budget = SandboxExecutionBudget.bounded(1);
+        SandboxClient client = WindowsNativeTestSupport.client(budget);
+        SandboxRequest invalid =
+                SandboxRequest.of(
+                        SandboxPolicy.builder(workspace.resolve("absent"))
+                                .readPolicy(ReadPolicy.HOST)
+                                .network(NetworkPolicy.ALLOW)
+                                .build(),
+                        request().build().command());
+        for (int i = 0; i < 3; i++) {
+            SandboxPolicyReadiness readiness = client.readiness(invalid);
+            assertFalse(readiness.ready());
+            assertEquals(SandboxErrorCode.POLICY_INVALID, readiness.error().get().code());
+            assertEquals(SandboxCleanupState.NOT_REQUIRED, readiness.cleanup().hostResources());
+            assertEquals(0, budget.inUse());
+        }
+        assertTrue(client.readiness(request().build()).ready());
+        assertEquals(0, budget.inUse());
         assertFalse(Files.exists(workspace.resolve("caller-target-marker")));
     }
 }

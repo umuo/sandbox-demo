@@ -191,3 +191,34 @@ O-01 已完成文档与编译门禁改进：README、首页、SDK 指南、策�
 修复改为查询真实进程 token 的账户，再配置宿主私有 DACL；不增加 Everyone/Administrators 授权，也不放宽路径租约。新增普通用户原生回归将 `user.name` 设为 SYSTEM，检查 DACL 仍只授予真实 token 用户，并验证合成文件读写/删除；此方法加入强制门禁。具体修复结果仍以对应新提交的三个 JDK 原生 CI 为准。
 
 `cd95d22` 的三个普通用户 JDK 任务不再报告私有目录访问拒绝，身份伪造回归通过；剩余两项旧测试错误地把 CMD 的删除失败等同于非零退出码（实测 stderr 为 Access is denied 而 exitCode=0）。删除/重命名验收改为校验命令已执行、文件内容不变、重命名目标不存在，并保留允许修改和允许删除的对照；PowerShell 的 Stop 语义继续要求非零退出。没有更改权限策略或减少必测方法。最终通过状态仍以修正提交的完整 CI 记录为准。
+
+O-02 最终提交 `1e3ae29` 的 [完整 CI](https://github.com/umuo/sandbox-demo/actions/runs/39900563120) 已确认 15/15 成功，包含 Windows 默认普通用户与专用账户两条 JDK 8/17/21 验收路径。
+
+## 9. O-03 实施与验收（2026-10-24） {#o03-implementation}
+
+### 受控复现
+
+基线源码 `1e3ae29`，本机 macOS 15.1 (24B2083) arm64、Zulu JDK 8u462。`SandboxCallbackAccumulationTest` 使用共享监督器启动固定 `/bin/sh`，以三个可释放 latch 阻塞观察回调，单个工作线程顺序提交三次请求。工作池退出后 active=0、queued=0，但三个回调仍阻塞，完成快照的 streams=UNKNOWN。释放 latch 后三个回调均退出、流租约结束。这是管道监督层证据，不是操作系统隔离证明。
+
+首次独立基线样本：JVM 线程数从 6 到交付后的 12，释放后为 8；打开的 FD 从 32 到 33，释放后仍为 33；观测 heap 从约 32.2 MB 到 51.1 MB。JVM 延迟启动的监督器、进程回收线程和 GC 会影响这些数字，此样本不证明 FD 或 heap 泄漏。确定的缺口是结果交付和工作池空闲未限制仍在执行的回调。测试始终在 finally 释放合成回调，不留下故意卡死的宿主线程。
+
+### 实现
+
+- 新增可共享的 `SandboxExecutionBudget`，默认 class-loader 内共享上限 32，可由宿主显式配置准入域。预算饱和时返回 `EXECUTION_CAPACITY_EXCEEDED/ADMISSION`，不调用后端或启动探针/目标，不排入无界等待队列。
+- 排队、同步/异步执行与实际策略预检统一占用预算。工作方法结束且登记租约全部结束时，由非阻塞原子操作归还名额；交付、取消和 UNKNOWN 清理状态不伪造释放。仍然保留终态 UNKNOWN/FAILED 的安全含义，预算空闲不代表完整清理证明。
+- 对两个 Windows runner 修正路径校验失败前登记 preparation 租约的顺序，避免不存在的工作目录消耗永久名额；worker Job 创建失败纳入已有 finally 清理，普通 ProcessBuilder 启动参数异常也结束未启动的进程租约。
+- 未引入额外回调队列或任意强杀。默认/production Windows 和 POSIX 原生回调验收同时检查：阻塞期间反复提交被拒绝、没有目标 marker，释放后预算归零并恢复执行。Windows 必测清单加入无效路径后容量恢复用例，更新为默认 18、production 11 个方法。
+
+### 验收与复现
+
+共享预算为 2 的场景中，两个已交付回调持续占用名额；跨客户端连续 20 次新提交全部拒绝，活动回调保持两个，释放后归零并恢复正常执行。测试同时覆盖同步交付残留租约、取消后的未结束 worker、排队取消/到期、工作池拒绝、准入/后端失败、外部清理报告不能覆盖活动租约，以及最后一个租约与 worker 并发结束的 30 次交错。
+
+```bash
+mvn -Dtest=SandboxExecutionBudgetTest,SandboxCallbackAccumulationTest,SandboxExecutionLifecycleTest test
+SANDBOX_RUN_LIFECYCLE_INTEGRATION=1 mvn -Dtest=SandboxNativeLifecycleTest test
+mvn verify
+```
+
+压力采样位于 `target/admission-evidence/`，CI 随各 OS/JDK artifact 上传；包含活动回调数、工作池状态、JVM 线程/heap、可取得时的 FD 数以及显式预算占用；Windows 原生用例另记录宿主 JVM handle 数，不记录路径、argv 或正文。打开 FD 不可查询时为 -1，budget 字段为 -1 仅表示该样本未读取显式预算，不表示无限容量。实际 JDK 8 和 JDK 17 的完整 verify 各 157 项、0 失败、0 错误、40 跳过；本机三项 macOS 原生生命周期测试已通过；本阶段 Windows/Linux 原生与完整矩阵结论以对应提交的 CI 为准。新的消费例使当前 consumer 源码数为 11，旧 10 个例子无需改动调用签名。
+
+宿主仍须控制预算域、class loader 和低层 runner 的使用，不应通过重建预算绕过饱和。此改动约束 SDK 在途工作，不能对用户代码自身的任意分配、未登记后台任务或未观察到的后代提供全局资源上界。平台清理保证与原有 UNKNOWN 边界不扩大。

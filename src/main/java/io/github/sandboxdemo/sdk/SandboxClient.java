@@ -33,13 +33,18 @@ import java.util.function.Supplier;
  */
 public final class SandboxClient {
 
+    private static final SandboxExecutionBudget DEFAULT_EXECUTION_BUDGET =
+            SandboxExecutionBudget.bounded(32);
+
     private final Duration cleanupGrace;
+    private final SandboxExecutionBudget executionBudget;
     private final SandboxRunner runner;
     private final SandboxCapabilities capabilities;
     private final Supplier<SandboxRuntimeStatus> statusSupplier;
 
     private SandboxClient(Builder builder) {
         this.cleanupGrace = builder.cleanupGrace;
+        this.executionBudget = builder.executionBudget;
         SandboxPlatform platform = SandboxPlatform.current();
         Path windowsHome =
                 builder.windowsHome == null
@@ -71,15 +76,15 @@ public final class SandboxClient {
     public SandboxResult execute(SandboxRequest request)
             throws SandboxException, InterruptedException {
         SandboxRequest required = Objects.requireNonNull(request, "request");
-        validateRequestCapabilities(required);
         ExecutionContext context = ExecutionContext.current();
         boolean owned = context == null;
         if (owned) {
-            context = new ExecutionContext(required.policy().timeout(), cleanupGrace);
+            context = newContext(required);
             context.beginWorker();
         }
         ExecutionContext previous = ExecutionContext.attach(context);
         try {
+            validateRequestCapabilities(required);
             context.checkActive();
             context.opaqueBackend();
             return runner.execute(required, context);
@@ -115,14 +120,34 @@ public final class SandboxClient {
             throw new IllegalArgumentException(
                     "execution pool requires a bounded queue and AbortPolicy");
         }
-        validateRequestCapabilities(required);
-        ExecutionContext context = new ExecutionContext(required.policy().timeout(), cleanupGrace);
-        ManagedExecution execution = new ManagedExecution(context);
-        execution.submit(() -> execute(required), workers);
-        return execution;
+        ExecutionContext context = newContext(required);
+        try {
+            validateRequestCapabilities(required);
+            ManagedExecution execution = new ManagedExecution(context);
+            execution.submit(() -> execute(required), workers);
+            return execution;
+        } catch (SandboxException | RuntimeException | Error failure) {
+            context.finishWorker();
+            throw failure;
+        }
     }
 
-    /** 在预算提交前验证请求能力与实际策略。探针不执行目标命令；执行时仍重新预检。 */
+    private ExecutionContext newContext(SandboxRequest request) throws SandboxException {
+        Runnable release = executionBudget.reserve();
+        try {
+            return new ExecutionContext(request.policy().timeout(), cleanupGrace, release);
+        } catch (RuntimeException | Error failure) {
+            release.run();
+            throw failure;
+        }
+    }
+
+    /** Admission budget shared by this client; delivery does not imply a slot is available. */
+    public SandboxExecutionBudget executionBudget() {
+        return executionBudget;
+    }
+
+    /** 在宿主业务预算提交前验证策略；预检也占用 SDK 名额。探针不执行目标命令。 */
     public void validate(SandboxRequest request) throws SandboxException, InterruptedException {
         SandboxRequest required = Objects.requireNonNull(request, "request");
         SandboxPolicyReadiness readiness = readiness(required);
@@ -140,7 +165,24 @@ public final class SandboxClient {
         ExecutionContext context = ExecutionContext.current();
         boolean owned = context == null;
         if (owned) {
-            context = new ExecutionContext(required.policy().timeout(), cleanupGrace);
+            try {
+                context = newContext(required);
+            } catch (SandboxException exhausted) {
+                return new SandboxPolicyReadiness(
+                        capabilities,
+                        io.github.sandboxdemo.api.SandboxBackendInfo.current(
+                                capabilities.platform(), capabilities.backendName(), null),
+                        required.policy(),
+                        exhausted,
+                        new SandboxCleanupResult(
+                                SandboxCleanupState.NOT_REQUIRED,
+                                SandboxCleanupState.NOT_REQUIRED,
+                                SandboxCleanupState.NOT_REQUIRED,
+                                SandboxCleanupState.NOT_REQUIRED,
+                                true),
+                        java.time.Instant.now(),
+                        Duration.ofNanos(System.nanoTime() - started));
+            }
             context.beginWorker();
         }
         ExecutionContext previous = ExecutionContext.attach(context);
@@ -351,12 +393,23 @@ public final class SandboxClient {
     public static final class Builder {
 
         private Duration cleanupGrace = Duration.ofSeconds(2);
+        private SandboxExecutionBudget executionBudget = DEFAULT_EXECUTION_BUDGET;
         private Path windowsHome;
         private SandboxRunner runner;
         private SandboxCapabilities capabilities;
         private Supplier<SandboxRuntimeStatus> statusSupplier;
 
         private Builder() {}
+
+        /**
+         * Selects a shared outstanding-execution budget. The default is shared by all default
+         * clients in this SDK class loader and allows 32 outstanding executions. Constructing
+         * separate explicit budgets creates separate admission domains; the host must bound them.
+         */
+        public Builder executionBudget(SandboxExecutionBudget budget) {
+            this.executionBudget = Objects.requireNonNull(budget, "budget");
+            return this;
+        }
 
         /** 设置统一清理宽限，范围为大于零至 30 秒。 */
         public Builder cleanupGrace(Duration grace) {

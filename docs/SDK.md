@@ -375,7 +375,9 @@ ThreadPoolExecutor workers = new ThreadPoolExecutor(
         2, 2, 0L, TimeUnit.MILLISECONDS,
         new ArrayBlockingQueue<Runnable>(16),
         new ThreadPoolExecutor.AbortPolicy());
+SandboxExecutionBudget budget = SandboxExecutionBudget.bounded(8);
 SandboxClient client = SandboxClient.builder()
+        .executionBudget(budget) // 同一宿主准入域的多个 client 应共享同一实例
         .cleanupGrace(Duration.ofSeconds(2))
         .build();
 SandboxExecution execution = client.start(request, workers);
@@ -388,7 +390,23 @@ boolean deliverable = completion.completeSuccessful();
 // 宿主负责关闭或复用 workers；关闭工作池本身不证明沙箱资源已回收。
 ```
 
-新增类型均位于 `api` 包。`SandboxExecution` 提供 `cancel()`、只读 `completion()` 快照、有界 `await(Duration)`、`await()` 以及独立 `cleanup()`；没有可由调用方随意 `complete/cancel` 的公开 Future。
+### 持续运行时的执行预算 {#execution-budget}
+
+`SandboxExecutionBudget` 位于 `sdk` 包。默认客户端在同一个 SDK class loader 内共享 32 个名额；这是保守的默认配置，不是性能容量承诺。可用 `bounded(n)` 创建显式预算并传入多个客户端，`limit()` / `inUse()` 用于观察限额与当前占用；先观察到空位不构成预约，必须处理实际提交失败。
+
+预算覆盖 `start` 的排队与运行、同步 `execute`，以及 `readiness` / `validate` 的可信预检。达到上限时 `start/execute/validate` 抛出 `EXECUTION_CAPACITY_EXCEEDED`，阶段为 `ADMISSION`；`readiness` 返回同一错误的未就绪结果。拒绝发生在后端能力协商、目录准备和命令/探针启动之前。`start` 的有限队列与 AbortPolicy 要求继续保留，工作池拒绝仍通过完成对象报告 `START_FAILED`。
+
+只有 SDK 工作方法结束、已登记的 process/stream/temp/host 租约全部结束后，名额才归还。句柄交付、取消请求、超时或 `Future` 结束不会独立归还名额；阻塞的输出回调仍持有其流租约，预算耗尽后保持拒绝，直到真实后台任务结束。排队取消、排队期限、提交拒绝和未分配资源的准备失败会归还名额。宿主主动排空工作池队列时，也应取消相应的执行句柄。
+
+**预算空闲不等于完整清理保证。** 租约结束时可报告 UNKNOWN/FAILED；macOS 的进程树证据和 Windows 宿主资源证据仍可能未知。预算限制 SDK 已登记且尚未结束的工作，不证明未观察到的后代消失，也不是 JVM heap、用户回调自身分配、CPU 或磁盘的硬限制。自定义 runner 启动的未登记后台任务、直接调用低层 runner、`status()` 健康检查和外部线程不在该计数范围内；宿主仍须根据 `cleanup()` 决定租户资源是否可复用。
+
+不提供强杀回调、强制清空名额或自动创建新预算的恢复接口。永久阻塞的用户代码应由宿主隔离到独立进程并协调恢复。创建彼此独立的预算或 class loader 会形成独立准入域，宿主须控制这些域的数量；不要为每次请求重建预算来绕过饱和。能力协商与同步入口仍不能硬中断任意阻塞的扩展方法，只是其在途占用也受到预算约束。
+
+完整 Java 8 消费案例见 `examples/sdk-consumer/src/main/java/example/SandboxBudgetExample.java`；受控复现与验证结果见 [O-03 优化记录](optimization-roadmap-jdk8.md#o03-implementation)。
+
+### 结果与清理快照
+
+执行句柄和清理 DTO 位于 `api` 包，预算对象位于 `sdk` 包。`SandboxExecution` 提供 `cancel()`、只读 `completion()` 快照、有界 `await(Duration)`、`await()` 以及独立 `cleanup()`；没有可由调用方随意 `complete/cancel` 的公开 Future。
 
 - `completion.reason()` 区分 `EXITED`、`TIMEOUT`、`CANCELLED`、`FAILED`；非零目标退出码仍属于 EXITED，退出成功与否另看 result。
 - `cleanup()` 分别报告进程、管道、SDK 临时文件与宿主资源的 `CONFIRMED / NOT_REQUIRED / UNKNOWN / FAILED`，同时报告后台执行是否结束。

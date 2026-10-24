@@ -28,9 +28,17 @@ public final class ExecutionContext implements SandboxExecutionControl {
     private boolean workerFinished;
     private boolean started;
     private Thread worker;
+    private final Runnable whenSettled;
+    private boolean capacityReleased;
     private final java.util.Map<java.nio.file.Path, Lease> temporaries = new java.util.HashMap<>();
 
     public ExecutionContext(Duration timeout, Duration grace) {
+        this(timeout, grace, () -> {});
+    }
+
+    /** Internal admission hook; must only perform a non-blocking SDK reservation release. */
+    public ExecutionContext(Duration timeout, Duration grace, Runnable whenSettled) {
+        this.whenSettled = java.util.Objects.requireNonNull(whenSettled, "whenSettled");
         if (timeout.isNegative()
                 || timeout.isZero()
                 || timeout.compareTo(Duration.ofHours(24)) > 0) {
@@ -66,6 +74,7 @@ public final class ExecutionContext implements SandboxExecutionControl {
     public synchronized boolean beginWorker() {
         if (workerFinished || stopReason() != null) {
             workerFinished = true;
+            releaseCapacityIfSettled();
             return false;
         }
         started = true;
@@ -80,6 +89,7 @@ public final class ExecutionContext implements SandboxExecutionControl {
     public synchronized void finishWorker() {
         worker = null;
         workerFinished = true;
+        releaseCapacityIfSettled();
     }
 
     public synchronized void opaqueBackend() {
@@ -91,6 +101,9 @@ public final class ExecutionContext implements SandboxExecutionControl {
     }
 
     public synchronized Lease track(Resource resource) {
+        if (capacityReleased) {
+            throw new IllegalStateException("execution resources have already settled");
+        }
         active[resource.ordinal()]++;
         return new Lease(resource);
     }
@@ -124,8 +137,22 @@ public final class ExecutionContext implements SandboxExecutionControl {
                 int index = resource.ordinal();
                 active[index]--;
                 settled[index] = combine(settled[index], state);
+                releaseCapacityIfSettled();
             }
         }
+    }
+
+    private void releaseCapacityIfSettled() {
+        if (capacityReleased || !workerFinished) {
+            return;
+        }
+        for (int count : active) {
+            if (count != 0) {
+                return;
+            }
+        }
+        capacityReleased = true;
+        whenSettled.run();
     }
 
     private static SandboxCleanupState combine(SandboxCleanupState old, SandboxCleanupState next) {
@@ -224,6 +251,7 @@ public final class ExecutionContext implements SandboxExecutionControl {
             return false;
         }
         workerFinished = true;
+        releaseCapacityIfSettled();
         return true;
     }
 

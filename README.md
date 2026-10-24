@@ -32,6 +32,7 @@ Windows 的 restricted-token 模型无法在保持通用 Win32 工具兼容性�
 - `readOnlyWorkingDirectory()` 可以表达真正的只读工作区；不再要求额外声明业务可写目录，SDK 私有临时目录仍可供工具缓存和临时文件使用。
 - 支持最大 8 MiB 的一次性 stdin；写入后关闭，不开放交互式 TTY。
 - stdout/stderr 有大小上限，timeout 有界，后台后代不会作为一次执行的遗留服务保留。
+- `SandboxClient` 默认共享 32 个在途执行名额；已交付但仍有阻塞回调或活动 SDK 资源租约的执行继续占用，饱和时失败关闭。可通过共享 `SandboxExecutionBudget` 显式配置，名额归还不等于原生清理全部确认，详见 [执行预算](docs/SDK.md#execution-budget)。
 - 后端缺失或无法执行策略时失败关闭，不降级为普通 `ProcessBuilder`。
 
 详细保证和限制见 [docs/SECURITY.md](docs/SECURITY.md)。

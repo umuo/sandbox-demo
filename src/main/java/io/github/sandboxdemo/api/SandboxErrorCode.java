@@ -11,5 +11,7 @@ public enum SandboxErrorCode {
     OUTPUT_LIMIT,
     TIMEOUT,
     CANCELLED,
-    CLEANUP_FAILED
+    CLEANUP_FAILED,
+    /** Host admission capacity is exhausted; no target or probe was launched. */
+    EXECUTION_CAPACITY_EXCEEDED
 }

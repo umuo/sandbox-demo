@@ -131,12 +131,12 @@ public final class WindowsRestrictedTokenSandboxRunner implements SandboxRunner 
             context.managedBackend();
             context.checkActive();
         }
+        io.github.sandboxdemo.core.ResourceAdmission.validate(request.policy(), this);
+        ValidatedPolicy policy = PathPolicyValidator.validate(request);
         io.github.sandboxdemo.core.ExecutionContext.Lease preparation =
                 context == null
                         ? null
                         : context.track(io.github.sandboxdemo.core.ExecutionContext.Resource.HOST);
-        io.github.sandboxdemo.core.ResourceAdmission.validate(request.policy(), this);
-        ValidatedPolicy policy = PathPolicyValidator.validate(request);
         try {
             if (policy.readPolicy() != ReadPolicy.HOST) {
                 throw new SandboxBackendUnavailableException(

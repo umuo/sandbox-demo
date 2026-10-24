@@ -10,6 +10,7 @@
     ],
     "WindowsReadinessIntegrationTest": [
       "policyProbeRunsOnlyTrustedCommandAndReportsUnknownHostCleanup",
+      "invalidPathPreparationDoesNotLeakAdmissionCapacity",
       "strictReadRemainsUnsupportedBeforeAnyTrustedWorkerOrTargetIsLaunched"
     ],
     "WindowsResourceLimitsIntegrationTest": [

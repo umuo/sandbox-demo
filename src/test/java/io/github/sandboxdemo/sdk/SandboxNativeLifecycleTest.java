@@ -134,6 +134,12 @@ class SandboxNativeLifecycleTest {
         CountDownLatch entered = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
         ThreadPoolExecutor workers = pool();
+        SandboxExecutionBudget budget = SandboxExecutionBudget.bounded(1);
+        SandboxClient client =
+                SandboxClient.builder()
+                        .executionBudget(budget)
+                        .cleanupGrace(Duration.ofMillis(400))
+                        .build();
         try {
             SandboxRequest request =
                     SandboxRequest.builder(workspace, "/bin/sh")
@@ -153,11 +159,26 @@ class SandboxNativeLifecycleTest {
                                         }
                                     })
                             .build();
-            SandboxExecution execution = client().start(request, workers);
+            SandboxExecution execution = client.start(request, workers);
             assertTrue(entered.await(2, TimeUnit.SECONDS), () -> diagnostic(execution));
             SandboxCompletion completion = execution.await(Duration.ofSeconds(2));
             assertFalse(completion.completeSuccessful());
             assertEquals(SandboxCleanupState.UNKNOWN, completion.cleanup().streams());
+            assertEquals(1, budget.inUse());
+            for (int i = 0; i < 20; i++) {
+                SandboxException denied =
+                        assertThrows(
+                                SandboxException.class,
+                                () ->
+                                        client.start(
+                                                request(
+                                                        "printf unexpected > budget-marker",
+                                                        Duration.ofSeconds(3)),
+                                                workers));
+                assertEquals(SandboxErrorCode.EXECUTION_CAPACITY_EXCEEDED, denied.code());
+                assertEquals(SandboxPhase.ADMISSION, denied.phase());
+            }
+            assertFalse(Files.exists(workspace.resolve("budget-marker")));
             release.countDown();
             long end = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
             while (execution.cleanup().streams() == SandboxCleanupState.UNKNOWN
@@ -166,6 +187,15 @@ class SandboxNativeLifecycleTest {
             }
             assertEquals(SandboxCleanupState.CONFIRMED, execution.cleanup().streams());
             assertEquals(SandboxCleanupState.UNKNOWN, completion.cleanup().streams());
+            long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
+            while (budget.inUse() != 0 && System.nanoTime() < until) {
+                Thread.sleep(10);
+            }
+            assertEquals(0, budget.inUse());
+            assertTrue(
+                    client.execute(request("printf recovered", Duration.ofSeconds(5)))
+                            .completeSuccessful());
+            assertEquals(0, budget.inUse());
         } finally {
             release.countDown();
             workers.shutdownNow();

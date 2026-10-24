@@ -95,7 +95,7 @@ exit /b %ERRORLEVEL%
         & taskkill.exe /PID $process.Id /T /F | Out-Null
     }
     # Copy reports even on failure; no account name/password is included in the identity evidence.
-    foreach ($name in @('surefire-reports', 'backend-evidence')) {
+    foreach ($name in @('surefire-reports', 'backend-evidence', 'admission-evidence')) {
         $path = Join-Path $root "source/target/$name"
         if (Test-Path $path) { Copy-Item $path $evidence -Recurse -Force }
     }

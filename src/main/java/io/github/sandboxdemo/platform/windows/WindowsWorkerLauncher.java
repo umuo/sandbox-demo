@@ -112,7 +112,7 @@ final class WindowsWorkerLauncher {
         ExecutionContext previous = ExecutionContext.attach(context);
         ExecutionContext.Lease processLease = context.track(ExecutionContext.Resource.PROCESS);
         ExecutionContext.Lease hostLease = context.track(ExecutionContext.Resource.HOST);
-        Pointer job = createKillOnCloseJob();
+        Pointer job = null;
         AtomicBoolean streamingComplete = new AtomicBoolean();
         ExecutorService streamReaders =
                 Executors.newFixedThreadPool(
@@ -154,6 +154,7 @@ final class WindowsWorkerLauncher {
                         });
 
         try {
+            job = createKillOnCloseJob();
             context.checkActive();
             boolean created =
                     Advapi32.INSTANCE.CreateProcessWithLogonW(

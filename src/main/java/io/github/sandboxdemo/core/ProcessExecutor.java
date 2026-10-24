@@ -156,6 +156,12 @@ public final class ProcessExecutor {
                     SandboxPhase.START,
                     "failed to start sandbox backend",
                     failure);
+        } catch (RuntimeException failure) {
+            processLease.complete(io.github.sandboxdemo.api.SandboxCleanupState.NOT_REQUIRED);
+            if (owned) {
+                context.finishWorker();
+            }
+            throw failure;
         }
         ExecutorService readers =
                 Executors.newFixedThreadPool(

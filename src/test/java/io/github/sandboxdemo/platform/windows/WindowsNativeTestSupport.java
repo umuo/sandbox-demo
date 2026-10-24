@@ -1,6 +1,7 @@
 package io.github.sandboxdemo.platform.windows;
 
 import io.github.sandboxdemo.sdk.SandboxClient;
+import io.github.sandboxdemo.sdk.SandboxExecutionBudget;
 import java.time.Duration;
 
 /** Explicit backend selection shared by the two native acceptance paths. */
@@ -16,6 +17,14 @@ public final class WindowsNativeTestSupport {
     }
 
     public static SandboxClient client() {
+        return builder().build();
+    }
+
+    public static SandboxClient client(SandboxExecutionBudget budget) {
+        return builder().executionBudget(budget).build();
+    }
+
+    private static SandboxClient.Builder builder() {
         if (defaultBackend() && "1".equals(System.getenv("SANDBOX_WINDOWS_PRODUCTION_TEST"))) {
             throw new IllegalStateException("native acceptance must select exactly one backend");
         }
@@ -23,6 +32,6 @@ public final class WindowsNativeTestSupport {
         if (!defaultBackend()) {
             builder.windowsProductionHome(WindowsSandboxInstallation.defaultHome());
         }
-        return builder.build();
+        return builder;
     }
 }
