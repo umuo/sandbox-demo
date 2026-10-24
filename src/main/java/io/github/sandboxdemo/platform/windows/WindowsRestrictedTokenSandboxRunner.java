@@ -132,12 +132,13 @@ public final class WindowsRestrictedTokenSandboxRunner implements SandboxRunner 
             context.checkActive();
         }
         io.github.sandboxdemo.core.ResourceAdmission.validate(request.policy(), this);
-        ValidatedPolicy policy = PathPolicyValidator.validate(request);
+        ValidatedPolicy policy = null;
         io.github.sandboxdemo.core.ExecutionContext.Lease preparation =
                 context == null
                         ? null
                         : context.track(io.github.sandboxdemo.core.ExecutionContext.Resource.HOST);
         try {
+            policy = PathPolicyValidator.validate(request);
             if (policy.readPolicy() != ReadPolicy.HOST) {
                 throw new SandboxBackendUnavailableException(
                         io.github.sandboxdemo.api.SandboxErrorCode.POLICY_UNSUPPORTED,
@@ -197,7 +198,9 @@ public final class WindowsRestrictedTokenSandboxRunner implements SandboxRunner 
             }
         } finally {
             try {
-                PathPolicyValidator.cleanup(policy);
+                if (policy != null) {
+                    PathPolicyValidator.cleanup(policy);
+                }
             } finally {
                 if (preparation != null) {
                     preparation.complete(io.github.sandboxdemo.api.SandboxCleanupState.UNKNOWN);

@@ -91,7 +91,7 @@ class WindowsReadinessIntegrationTest {
             SandboxPolicyReadiness readiness = client.readiness(invalid);
             assertFalse(readiness.ready());
             assertEquals(SandboxErrorCode.POLICY_INVALID, readiness.error().get().code());
-            assertEquals(SandboxCleanupState.NOT_REQUIRED, readiness.cleanup().hostResources());
+            assertEquals(SandboxCleanupState.UNKNOWN, readiness.cleanup().hostResources());
             assertEquals(0, budget.inUse());
         }
         assertTrue(client.readiness(request().build()).ready());

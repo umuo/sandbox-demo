@@ -206,7 +206,7 @@ O-02 最终提交 `1e3ae29` 的 [完整 CI](https://github.com/umuo/sandbox-demo
 
 - 新增可共享的 `SandboxExecutionBudget`，默认 class-loader 内共享上限 32，可由宿主显式配置准入域。预算饱和时返回 `EXECUTION_CAPACITY_EXCEEDED/ADMISSION`，不调用后端或启动探针/目标，不排入无界等待队列。
 - 排队、同步/异步执行与实际策略预检统一占用预算。工作方法结束且登记租约全部结束时，由非阻塞原子操作归还名额；交付、取消和 UNKNOWN 清理状态不伪造释放。仍然保留终态 UNKNOWN/FAILED 的安全含义，预算空闲不代表完整清理证明。
-- 对两个 Windows runner 修正路径校验失败前登记 preparation 租约的顺序，避免不存在的工作目录消耗永久名额；worker Job 创建失败纳入已有 finally 清理，普通 ProcessBuilder 启动参数异常也结束未启动的进程租约。
+- 对两个 Windows runner 将路径校验纳入 preparation 租约的 finally 结束路径，避免不存在的工作目录消耗永久名额；准备阶段仍保留宿主资源 UNKNOWN，不因容量归还提升清理保证；worker Job 创建失败纳入已有 finally 清理，普通 ProcessBuilder 启动参数异常也结束未启动的进程租约。
 - 未引入额外回调队列或任意强杀。默认/production Windows 和 POSIX 原生回调验收同时检查：阻塞期间反复提交被拒绝、没有目标 marker，释放后预算归零并恢复执行。Windows 必测清单加入无效路径后容量恢复用例，更新为默认 18、production 11 个方法。
 
 ### 验收与复现
