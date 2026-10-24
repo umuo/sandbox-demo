@@ -392,6 +392,8 @@ boolean deliverable = completion.completeSuccessful();
 
 ### 持续运行时的执行预算 {#execution-budget}
 
+本节 API 为 `jdk1.8` 分支新增，消费示例使用本地构建的 `1.0.0-SNAPSHOT`；已发布的 `0.1.0-alpha.2` 不包含 `SandboxExecutionBudget`，应在发布包含此功能的新版本后再更新生产依赖。
+
 `SandboxExecutionBudget` 位于 `sdk` 包。默认客户端在同一个 SDK class loader 内共享 32 个名额；这是保守的默认配置，不是性能容量承诺。可用 `bounded(n)` 创建显式预算并传入多个客户端，`limit()` / `inUse()` 用于观察限额与当前占用；先观察到空位不构成预约，必须处理实际提交失败。
 
 预算覆盖 `start` 的排队与运行、同步 `execute`，以及 `readiness` / `validate` 的可信预检。达到上限时 `start/execute/validate` 抛出 `EXECUTION_CAPACITY_EXCEEDED`，阶段为 `ADMISSION`；`readiness` 返回同一错误的未就绪结果。拒绝发生在后端能力协商、目录准备和命令/探针启动之前。`start` 的有限队列与 AbortPolicy 要求继续保留，工作池拒绝仍通过完成对象报告 `START_FAILED`。
