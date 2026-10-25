@@ -133,6 +133,7 @@ class WindowsHostCleanupIntegrationTest {
                 new ArrayList<>(
                         Arrays.asList(
                                 SandboxHostResource.FILESYSTEM_ACL,
+                                SandboxHostResource.NATIVE_ALLOCATIONS,
                                 SandboxHostResource.PATH_HANDLES,
                                 SandboxHostResource.NATIVE_HANDLES));
         if (!WindowsNativeTestSupport.defaultBackend())

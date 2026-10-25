@@ -232,3 +232,5 @@ mvn verify
 新增四项跨平台回归及六项双后端原生验收。故障范围涵盖 ACL 准备、desktop 创建、Job 创建/挂入/恢复、各类关闭/撤销 acknowledgement；覆盖 protected 子路径不带回 capability ACE、重复 close、失败粘滞与恢复后再次执行。原生必测清单更新为默认 24、production 17，分类状态 XML 随 CI artifact 上传。原生用例只操作合成目录与随机 capability；清理故障先真实回收再模拟失败结果，不污染 CI 宿主。
 
 JDK 8 与 JDK 17 完整 verify 的本地结果各 167 项、0 失败、0 错误、46 跳过。Windows 原生用例在 macOS 上跳过，真实验收以本轮提交对应 CI 为准。总体 Windows `hostResources=UNKNOWN` 继续保留：JNA 托管分配等尚无完整独立证明，production 协议 v7 仍不报告 worker 内部清理，并显式记录 `REMOTE_WORKER=UNKNOWN`。分类 CONFIRMED 仅确认已登记检查，不扩大隔离或全面回收保证。
+
+分类检查与故障验收提交 `c1fafa2` 的 [完整 CI](https://github.com/umuo/sandbox-demo/actions/runs/40178465491) 已确认 15/15 成功，包含两条 Windows 后端的 JDK 8/17/21。最终复查补齐用户环境块释放返回值，并把 NATIVE_ALLOCATIONS 的失败 acknowledgement 加入相同原生验收；该补充仍需以其对应提交的 CI 为准。

@@ -597,7 +597,9 @@ final class WindowsRestrictedProcessLauncher {
                 offset += (long) (entry.length() + 1) * Native.WCHAR_SIZE;
             }
         } finally {
-            Userenv.INSTANCE.DestroyEnvironmentBlock(block);
+            WindowsCleanup.run(
+                    io.github.sandboxdemo.api.SandboxHostResource.NATIVE_ALLOCATIONS,
+                    () -> Userenv.INSTANCE.DestroyEnvironmentBlock(block));
         }
 
         sandboxEnvironment.forEach(
