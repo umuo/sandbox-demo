@@ -420,11 +420,25 @@ boolean deliverable = completion.completeSuccessful();
 
 取消使用控制标志。监督器和 Windows 原生等待短轮询该标志；deadline 线程不会同步关闭管道、销毁进程或执行任意用户的中断 I/O hook。启动或文件系统调用卡住时，句柄仍交付 UNKNOWN，实际后台工作可能继续；资源状态不能据 Future/句柄交付完成推断为已释放。传统 `execute` 继续是阻塞接口，有界交付应使用 `start`。
 
+### Windows 宿主资源的逐项证据
+
+当前 SNAPSHOT 新增 `cleanup.hostDetails()`，返回以 `SandboxHostResource` 为键的不可变状态快照；旧五参数构造器仍可用。示例只输出固定枚举，不包含句柄、SID 或绝对路径：
+
+```java
+SandboxCleanupResult cleanup = client.readiness(request).cleanup();
+cleanup.hostDetails().forEach((resource, state) ->
+        System.out.println(resource.name() + "=" + state.name()));
+```
+
+已登记的检查包括 `NATIVE_HANDLES`（关闭句柄/释放 mutex）、`NATIVE_ALLOCATIONS`（LocalFree/环境块释放）、`PATH_HANDLES`、`FILESYSTEM_ACL`、`PRIVATE_DESKTOP`、`WINDOW_STATION_ACL` 和 `WORKER_SESSION`。ACL 回滚在撤销和恢复结束后重新读取，核对临时 capability ACE 已消失；快照恢复同时核对原始 ACE 内容与 DACL 继承保护位。关闭失败不会阻止其他资源回收；同类任一 FAILED 保持 FAILED，后续成功不能覆盖它。未结束的检查显示 UNKNOWN，并继续占用 SDK 准入名额。
+
+这些分类只覆盖已登记的实际检查。缺失键表示没有观察证据，不能解释为成功；某类 CONFIRMED 也不表示该类所有未登记资源都已独立验证。JNA 管理的分配等尚无完整证明，Windows 总体 `hostResources()` 因此仍保留 UNKNOWN；production 的协议 v7 不报告 worker 内部回滚，额外以 `REMOTE_WORKER=UNKNOWN` 明示。任何明细 FAILED 会把总体降为 FAILED，不提升 `confirmed()` 或 `completeSuccessful()`。同步 `SandboxResult` 继续只描述命令与输出；需要清理证据时使用 readiness 或执行句柄。
+
 ### 平台强度和扩展后端
 
 macOS 仅通过 Java 观察后代，Java 8 下没有 ProcessHandle，且 JDK 17/21 也不能证明未观察到的脱离后代已结束。因此当前 macOS 的进程树回收保持 UNKNOWN；目标 root 已结束或管道已关闭都不能提升成完整树保证。
 
-Linux 使用 PID namespace 边界；Windows 只有在原生 `QueryInformationJobObject` 确认活跃进程数为零、root 也结束时，才确认受监督 Job 回收。Windows 的专用账户 worker 与默认原生 launcher 使用同一停止信号和宽限；管道实际 I/O 线程负责关闭句柄，监督器只请求取消 I/O。Windows desktop/ACL 回滚和普通 handle 关闭仍缺少完整证据，宿主资源保持 UNKNOWN，不能宣称全面回收成功。
+Linux 使用 PID namespace 边界；Windows 只有在原生 `QueryInformationJobObject` 确认活跃进程数为零、root 也结束时，才确认受监督 Job 回收。Windows 的专用账户 worker 与默认原生 launcher 使用同一停止信号和宽限；管道实际 I/O 线程负责关闭句柄，监督器只请求取消 I/O。Windows 已提供上述逐项关闭和 ACL 读回证据，尚未覆盖的宿主资源仍使总体保持 UNKNOWN，不能宣称全面回收成功。
 
 原有自定义 runner 的 `execute(request)` 继续可用。新增默认 `execute(request, control)` 在进入前检查信号；后端可覆盖该方法并轮询 `SandboxExecutionControl`，通过 `reportCleanup` 明确上报真实回收证据。SDK 仍独立判断自己的工作线程是否结束；上报值不能覆盖未完成的 SDK 资源账本。旧后端即使返回成功，也不自动获得回收证据。任何不响应停止的自定义后端，在 deadline 后得到有界 UNKNOWN 交付，不能强制停止其任意 Java 代码。
 

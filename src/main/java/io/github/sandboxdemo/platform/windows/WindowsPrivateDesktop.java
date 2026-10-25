@@ -40,19 +40,25 @@ final class WindowsPrivateDesktop implements AutoCloseable {
     private final Pointer desktop;
     private final Memory startupName;
     private boolean closed;
+    private final WindowsCleanup.Check desktopCleanup;
+    private final WindowsCleanup.Check stationCleanup;
 
     private WindowsPrivateDesktop(
             String userSid,
             Pointer windowStation,
             List<String> stationCapabilitySids,
             Pointer desktop,
-            Memory startupName) {
+            Memory startupName,
+            WindowsCleanup.Check desktopCleanup,
+            WindowsCleanup.Check stationCleanup) {
         this.userSid = userSid;
         this.windowStation = windowStation;
         this.stationCapabilitySids =
                 io.github.sandboxdemo.core.Java8.copyList(stationCapabilitySids);
         this.desktop = desktop;
         this.startupName = startupName;
+        this.desktopCleanup = desktopCleanup;
+        this.stationCleanup = stationCleanup;
     }
 
     static WindowsPrivateDesktop create(String userSid, List<String> capabilitySids)
@@ -62,6 +68,11 @@ final class WindowsPrivateDesktop implements AutoCloseable {
         List<String> grantedSids = new ArrayList<>();
         boolean completed = false;
         PointerByReference descriptor = new PointerByReference();
+        WindowsCleanup.Check desktopCleanup =
+                WindowsCleanup.begin(io.github.sandboxdemo.api.SandboxHostResource.PRIVATE_DESKTOP);
+        WindowsCleanup.Check stationCleanup =
+                WindowsCleanup.begin(
+                        io.github.sandboxdemo.api.SandboxHostResource.WINDOW_STATION_ACL);
         try {
             windowStation = User32.INSTANCE.GetProcessWindowStation();
             if (isInvalid(windowStation)) {
@@ -98,6 +109,9 @@ final class WindowsPrivateDesktop implements AutoCloseable {
             attributes.lpSecurityDescriptor = descriptor.getValue();
             attributes.bInheritHandle = 0;
             attributes.write();
+            if (!WindowsCleanup.allowed("create-desktop")) {
+                throw win32("CreateDesktopW");
+            }
             desktop =
                     User32.INSTANCE.CreateDesktopW(
                             new WString(desktopName),
@@ -116,16 +130,24 @@ final class WindowsPrivateDesktop implements AutoCloseable {
                             windowStation,
                             grantedSids,
                             desktop,
-                            WindowsNative.wideString(windowStationName + "\\" + desktopName));
+                            WindowsNative.wideString(windowStationName + "\\" + desktopName),
+                            desktopCleanup,
+                            stationCleanup);
             completed = true;
             return result;
         } finally {
             if (descriptor.getValue() != null) {
-                Kernel32.INSTANCE.LocalFree(descriptor.getValue());
+                WindowsCleanup.localFree(descriptor.getValue());
             }
             if (!completed) {
-                closeDesktop(desktop);
-                rollbackWindowStationAcl(userSid, windowStation, grantedSids);
+                desktopCleanup.complete(
+                        closeDesktop(desktop)
+                                ? io.github.sandboxdemo.api.SandboxCleanupState.CONFIRMED
+                                : io.github.sandboxdemo.api.SandboxCleanupState.FAILED);
+                stationCleanup.complete(
+                        rollbackWindowStationAcl(userSid, windowStation, grantedSids)
+                                ? io.github.sandboxdemo.api.SandboxCleanupState.CONFIRMED
+                                : io.github.sandboxdemo.api.SandboxCleanupState.FAILED);
             }
         }
     }
@@ -138,8 +160,14 @@ final class WindowsPrivateDesktop implements AutoCloseable {
     public synchronized void close() {
         if (!closed) {
             closed = true;
-            closeDesktop(desktop);
-            rollbackWindowStationAcl(userSid, windowStation, stationCapabilitySids);
+            desktopCleanup.complete(
+                    closeDesktop(desktop)
+                            ? io.github.sandboxdemo.api.SandboxCleanupState.CONFIRMED
+                            : io.github.sandboxdemo.api.SandboxCleanupState.FAILED);
+            stationCleanup.complete(
+                    rollbackWindowStationAcl(userSid, windowStation, stationCapabilitySids)
+                            ? io.github.sandboxdemo.api.SandboxCleanupState.CONFIRMED
+                            : io.github.sandboxdemo.api.SandboxCleanupState.FAILED);
         }
     }
 
@@ -210,25 +238,29 @@ final class WindowsPrivateDesktop implements AutoCloseable {
             if (setError != 0) {
                 throw windowsError("SetSecurityInfo(window station)", setError);
             }
+            if (accessMode == REVOKE_ACCESS && !WindowsAclEvidence.station(handle, sid)) {
+                throw windowsError("read back window station ACL rollback", 5);
+            }
         } finally {
             if (newAcl != null) {
-                Kernel32.INSTANCE.LocalFree(newAcl);
+                WindowsCleanup.localFree(newAcl);
             }
             if (securityDescriptor != null) {
-                Kernel32.INSTANCE.LocalFree(securityDescriptor);
+                WindowsCleanup.localFree(securityDescriptor);
             }
             if (convertedSid != null) {
-                Kernel32.INSTANCE.LocalFree(convertedSid);
+                WindowsCleanup.localFree(convertedSid);
             }
         }
     }
 
-    private static void rollbackWindowStationAcl(
+    private static boolean rollbackWindowStationAcl(
             String userSid, Pointer handle, List<String> grantedSids) {
         if (isInvalid(handle)) {
-            return;
+            return true;
         }
         Pointer mutex = null;
+        boolean success = true;
         try {
             mutex = acquireMutex(userSid);
             List<String> reverse = new ArrayList<>(grantedSids);
@@ -236,15 +268,18 @@ final class WindowsPrivateDesktop implements AutoCloseable {
             for (String sid : reverse) {
                 try {
                     updateWindowStationAcl(handle, sid, REVOKE_ACCESS);
-                } catch (Exception ignored) {
-                    // Continue removing the other independently generated capability SIDs.
+                } catch (Exception | LinkageError ignored) {
+                    success = false;
                 }
             }
-        } catch (Exception ignored) {
-            // A leaked random capability ACE is inert because no later token reuses its SID.
+        } catch (Exception | LinkageError ignored) {
+            success = false;
         } finally {
             releaseMutex(mutex);
         }
+        return success
+                && WindowsCleanup.allowed(
+                        io.github.sandboxdemo.api.SandboxHostResource.WINDOW_STATION_ACL.name());
     }
 
     private static Pointer acquireMutex(String userSid) throws SandboxException {
@@ -255,7 +290,7 @@ final class WindowsPrivateDesktop implements AutoCloseable {
         }
         int wait = Kernel32.INSTANCE.WaitForSingleObject(handle, INFINITE);
         if (wait != WAIT_OBJECT_0 && wait != WAIT_ABANDONED) {
-            Kernel32.INSTANCE.CloseHandle(handle);
+            WindowsCleanup.closeHandle(handle);
             throw win32("WaitForSingleObject(window station ACL mutex)");
         }
         return handle;
@@ -277,8 +312,13 @@ final class WindowsPrivateDesktop implements AutoCloseable {
 
     private static void releaseMutex(Pointer handle) {
         if (!isInvalid(handle)) {
-            Kernel32.INSTANCE.ReleaseMutex(handle);
-            Kernel32.INSTANCE.CloseHandle(handle);
+            WindowsCleanup.run(
+                    io.github.sandboxdemo.api.SandboxHostResource.NATIVE_HANDLES,
+                    () -> {
+                        boolean released = Kernel32.INSTANCE.ReleaseMutex(handle);
+                        boolean closed = WindowsCleanup.closeHandle(handle);
+                        return released & closed;
+                    });
         }
     }
 
@@ -286,10 +326,11 @@ final class WindowsPrivateDesktop implements AutoCloseable {
         return handle == null || Pointer.nativeValue(handle) == 0;
     }
 
-    private static void closeDesktop(Pointer handle) {
-        if (!isInvalid(handle)) {
-            User32.INSTANCE.CloseDesktop(handle);
-        }
+    private static boolean closeDesktop(Pointer handle) {
+        return isInvalid(handle)
+                || WindowsCleanup.run(
+                        io.github.sandboxdemo.api.SandboxHostResource.PRIVATE_DESKTOP,
+                        () -> User32.INSTANCE.CloseDesktop(handle));
     }
 
     private static SandboxException win32(String operation) {

@@ -134,3 +134,9 @@ python -m unittest discover -s .github/scripts -p 'test_windows_native_evidence.
 ```
 
 门禁不能把 Windows 的 `hostResources UNKNOWN` 提升为完整清理保证；非 Windows 本地测试跳过原生用例也不能满足这两条原生门禁。
+
+### Windows 宿主回收故障验收
+
+`WindowsHostCleanupIntegrationTest` 加入双后端必测清单，当前默认 24、production 17 个方法。新增六项覆盖正常逐项检查、Job 创建/挂入/恢复失败、ACL 准备失败、protected 子路径的 DACL 精确恢复、desktop 创建/关闭和 window-station ACL 撤销，以及关闭失败后继续回收。清理故障先执行真实回收再模拟失败 acknowledgement；测试不会故意泄漏句柄或保留临时 ACE。该内部测试接缝没有环境变量或公共 API 开关。
+
+普通用户报告的 `target/windows-default/cleanup-evidence/` 与 production 的 `target/cleanup-evidence/` 随现有 artifact 上传。XML 仅含后端名、资源枚举和状态，不含路径、SID、请求或输出。缺方法、跳过及失败仍由原有原生门禁拒绝。分类成功不能提升总体 UNKNOWN，worker 内部证据不通过外部宿主成功来代替。

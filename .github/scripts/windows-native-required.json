@@ -19,6 +19,14 @@
     ],
     "SandboxStrictEnvironmentIntegrationTest": [
       "nativeStrictTargetExcludesParentSecretsAndUsesPrivateHome"
+    ],
+    "WindowsHostCleanupIntegrationTest": [
+      "successfulExecutionReportsCheckedHostResourcesWithoutPromotingUnknown",
+      "suspendedLaunchFailuresStillReleaseAclAndPathHandles",
+      "failedCleanupAcknowledgementRetainsFailureAndContinuesOtherCleanup",
+      "protectedDescendantRestoresOriginalDaclWithoutTemporaryCapabilitySid",
+      "failedAclPreparationRestoresOriginalDacl",
+      "desktopCreationAndCloseFailuresStillRevokeWindowStationCapability"
     ]
   },
   "default": {
@@ -36,6 +44,8 @@
     ]
   },
   "production": {
-    "WindowsElevatedRejectionTest": ["elevatedHostCannotProbeOrExecuteDefaultBackend"]
+    "WindowsElevatedRejectionTest": [
+      "elevatedHostCannotProbeOrExecuteDefaultBackend"
+    ]
   }
 }

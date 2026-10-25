@@ -112,6 +112,11 @@ final class WindowsWorkerLauncher {
         ExecutionContext previous = ExecutionContext.attach(context);
         ExecutionContext.Lease processLease = context.track(ExecutionContext.Resource.PROCESS);
         ExecutionContext.Lease hostLease = context.track(ExecutionContext.Resource.HOST);
+        WindowsCleanup.Check remote =
+                WindowsCleanup.begin(io.github.sandboxdemo.api.SandboxHostResource.REMOTE_WORKER);
+        remote.complete(
+                SandboxCleanupState
+                        .UNKNOWN); // v7 does not carry worker-internal rollback evidence.
         Pointer job = null;
         AtomicBoolean streamingComplete = new AtomicBoolean();
         ExecutorService streamReaders =
@@ -154,6 +159,9 @@ final class WindowsWorkerLauncher {
                         });
 
         try {
+            if (!WindowsCleanup.allowed("worker-create-job")) {
+                throw win32("CreateJobObjectW");
+            }
             job = createKillOnCloseJob();
             context.checkActive();
             boolean created =
@@ -184,13 +192,15 @@ final class WindowsWorkerLauncher {
                 throw win32("CreateProcessWithLogonW(worker)", error);
             }
             process.read();
-            if (!Kernel32.INSTANCE.AssignProcessToJobObject(job, process.hProcess)) {
+            if (!WindowsCleanup.allowed("worker-assign-job")
+                    || !Kernel32.INSTANCE.AssignProcessToJobObject(job, process.hProcess)) {
                 int error = Native.getLastError();
                 Kernel32.INSTANCE.TerminateJobObject(job, 125);
                 throw win32("AssignProcessToJobObject(worker)", error);
             }
             context.checkActive();
-            if (Kernel32.INSTANCE.ResumeThread(process.hThread) == -1) {
+            if (!WindowsCleanup.allowed("worker-resume")
+                    || Kernel32.INSTANCE.ResumeThread(process.hThread) == -1) {
                 int error = Native.getLastError();
                 Kernel32.INSTANCE.TerminateJobObject(job, 125);
                 throw win32("ResumeThread(worker)", error);
@@ -346,7 +356,7 @@ final class WindowsWorkerLauncher {
 
     private static void close(Pointer handle) {
         if (handle != null && Pointer.nativeValue(handle) != -1L) {
-            Kernel32.INSTANCE.CloseHandle(handle);
+            WindowsCleanup.closeHandle(handle);
         }
     }
 }

@@ -268,6 +268,9 @@ final class WindowsRestrictedProcessLauncher {
                     createHandleList(
                             io.github.sandboxdemo.core.Java8.listOf(
                                     stdinRead, stdoutWrite, stderrWrite));
+            if (!WindowsCleanup.allowed("create-job")) {
+                throw win32("CreateJobObjectW");
+            }
             job = createKillOnCloseJob(policy.resourceLimits(), policy.requiredIsolation());
 
             WindowsNative.STARTUPINFOEX startup = new WindowsNative.STARTUPINFOEX();
@@ -307,13 +310,15 @@ final class WindowsRestrictedProcessLauncher {
             }
             processInfo.read();
 
-            if (!Kernel32.INSTANCE.AssignProcessToJobObject(job, processInfo.hProcess)) {
+            if (!WindowsCleanup.allowed("assign-job")
+                    || !Kernel32.INSTANCE.AssignProcessToJobObject(job, processInfo.hProcess)) {
                 int error = Native.getLastError();
                 Kernel32.INSTANCE.TerminateJobObject(job, 125);
                 throw win32("AssignProcessToJobObject", error);
             }
             context.checkActive();
-            if (Kernel32.INSTANCE.ResumeThread(processInfo.hThread) == -1) {
+            if (!WindowsCleanup.allowed("resume")
+                    || Kernel32.INSTANCE.ResumeThread(processInfo.hThread) == -1) {
                 int error = Native.getLastError();
                 Kernel32.INSTANCE.TerminateJobObject(job, 125);
                 throw win32("ResumeThread", error);
@@ -440,11 +445,12 @@ final class WindowsRestrictedProcessLauncher {
             close(stdinWrite.getAndSet(null));
             close(restrictedToken);
             close(baseToken);
-            convertedSids.forEach(Kernel32.INSTANCE::LocalFree);
+            convertedSids.forEach(WindowsCleanup::localFree);
             if (desktop != null) {
                 desktop.close();
             }
-            // Desktop rollback and generic CloseHandle failures are not yet independently proven.
+            // Named checks report observed closes and ACL readback. JNA-managed allocations and
+            // unobserved native resources still prevent a complete host cleanup guarantee.
             hostLease.complete(SandboxCleanupState.UNKNOWN);
             if (owned) {
                 context.finishWorker();
@@ -467,7 +473,7 @@ final class WindowsRestrictedProcessLauncher {
             return com.sun.jna.platform.win32.Advapi32Util.getTokenAccount(token.getValue())
                     .sidString;
         } finally {
-            com.sun.jna.platform.win32.Kernel32.INSTANCE.CloseHandle(token.getValue());
+            WindowsCleanup.closeHandle(token.getValue().getPointer());
         }
     }
 
@@ -685,7 +691,7 @@ final class WindowsRestrictedProcessLauncher {
         try {
             return converted.getValue().getWideString(0);
         } finally {
-            Kernel32.INSTANCE.LocalFree(converted.getValue());
+            WindowsCleanup.localFree(converted.getValue());
         }
     }
 
@@ -739,7 +745,7 @@ final class WindowsRestrictedProcessLauncher {
                 allocatedAcl = updatedAcl.getValue();
                 currentAcl = allocatedAcl;
                 if (previousAllocatedAcl != null) {
-                    Kernel32.INSTANCE.LocalFree(previousAllocatedAcl);
+                    WindowsCleanup.localFree(previousAllocatedAcl);
                 }
             }
 
@@ -752,7 +758,7 @@ final class WindowsRestrictedProcessLauncher {
             }
         } finally {
             if (allocatedAcl != null) {
-                Kernel32.INSTANCE.LocalFree(allocatedAcl);
+                WindowsCleanup.localFree(allocatedAcl);
             }
         }
     }
@@ -1031,7 +1037,7 @@ final class WindowsRestrictedProcessLauncher {
 
     private static void close(Pointer handle) {
         if (!isInvalid(handle)) {
-            Kernel32.INSTANCE.CloseHandle(handle);
+            WindowsCleanup.closeHandle(handle);
         }
     }
 

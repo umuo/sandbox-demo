@@ -10,7 +10,6 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 
@@ -28,6 +27,9 @@ final class WindowsSandboxSession implements AutoCloseable {
     private final Path stdoutStreamFile;
     private final Path stderrStreamFile;
     private Pointer sealedRequestHandle;
+    private final WindowsCleanup.Check cleanup =
+            WindowsCleanup.begin(io.github.sandboxdemo.api.SandboxHostResource.WORKER_SESSION);
+    private boolean closed;
 
     private WindowsSandboxSession(Path directory) {
         this.directory = directory;
@@ -44,7 +46,12 @@ final class WindowsSandboxSession implements AutoCloseable {
             Files.createDirectories(sessions);
             Path directory = Files.createDirectory(sessions.resolve("run-" + UUID.randomUUID()));
             WindowsSandboxSession session = new WindowsSandboxSession(directory);
-            session.grantWorker(sandboxUserSid);
+            try {
+                session.grantWorker(sandboxUserSid);
+            } catch (SandboxException | InterruptedException | RuntimeException failure) {
+                session.close();
+                throw failure;
+            }
             return session;
         } catch (IOException e) {
             throw new SandboxException(
@@ -138,26 +145,23 @@ final class WindowsSandboxSession implements AutoCloseable {
     }
 
     @Override
-    public void close() {
-        if (sealedRequestHandle != null && Pointer.nativeValue(sealedRequestHandle) != -1L) {
-            Kernel32.INSTANCE.CloseHandle(sealedRequestHandle);
-            sealedRequestHandle = null;
-        }
-        if (!Files.exists(directory)) {
+    public synchronized void close() {
+        if (closed) {
             return;
         }
-        try (java.util.stream.Stream<Path> paths = Files.walk(directory)) {
-            paths.sorted(Comparator.reverseOrder())
-                    .forEach(
-                            path -> {
-                                try {
-                                    Files.deleteIfExists(path);
-                                } catch (IOException ignored) {
-                                    // A later setup maintenance pass may remove abandoned sessions.
-                                }
-                            });
-        } catch (IOException ignored) {
-            // Best effort; no credential is stored in this directory.
+        closed = true;
+        boolean success = true;
+        if (sealedRequestHandle != null && Pointer.nativeValue(sealedRequestHandle) != -1L) {
+            success = WindowsCleanup.closeHandle(sealedRequestHandle);
+            sealedRequestHandle = null;
         }
+        success &=
+                WindowsCleanup.run(
+                        io.github.sandboxdemo.api.SandboxHostResource.WORKER_SESSION,
+                        () -> io.github.sandboxdemo.core.PrivateDirectories.removeTree(directory));
+        cleanup.complete(
+                success
+                        ? io.github.sandboxdemo.api.SandboxCleanupState.CONFIRMED
+                        : io.github.sandboxdemo.api.SandboxCleanupState.FAILED);
     }
 }

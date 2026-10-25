@@ -75,7 +75,7 @@ mvn -o -B -ntp -Dmaven.repo.local=/Volumes/Nas/envs/maven/repository verify
 
 **验收：** 到达容量阈值后新请求明确拒绝，后台任务不会随批次数无限增加；取消交付仍遵守期限；回调恢复后资源归位；被卡住的真实资源仍显示 UNKNOWN。分别验证默认与 production Windows 路径及 POSIX 共享执行层。
 
-### O-04 · P1：补齐 Windows 宿主资源回收证据（已知限制）
+### O-04 · P1：补齐 Windows 宿主资源回收证据（已实施分类检查，完整保证仍有限制）
 
 **依据：** `WindowsRestrictedProcessLauncher` 清理处明确把 `hostLease` 完成为 UNKNOWN，注释指出 desktop rollback 和通用 CloseHandle 尚未独立确认。项目已有 ACL ledger 和 lease，需完善证据而非重写整套资源模型。
 
@@ -222,3 +222,13 @@ mvn verify
 压力采样位于 `target/admission-evidence/`，CI 随各 OS/JDK artifact 上传；包含活动回调数、工作池状态、JVM 线程/heap、可取得时的 FD 数以及显式预算占用；Windows 原生用例另记录宿主 JVM handle 数，不记录路径、argv 或正文。打开 FD 不可查询时为 -1，budget 字段为 -1 仅表示该样本未读取显式预算，不表示无限容量。实际 JDK 8 和 JDK 17 的完整 verify 各 157 项、0 失败、0 错误、40 跳过；本机三项 macOS 原生生命周期测试已通过；本阶段 Windows/Linux 原生与完整矩阵结论以对应提交的 CI 为准。新的消费例使当前 consumer 源码数为 11，旧 10 个例子无需改动调用签名。
 
 宿主仍须控制预算域、class loader 和低层 runner 的使用，不应通过重建预算绕过饱和。此改动约束 SDK 在途工作，不能对用户代码自身的任意分配、未登记后台任务或未观察到的后代提供全局资源上界。平台清理保证与原有 UNKNOWN 边界不扩大。
+
+## 10. O-04 实施与验收（2026-10-25）
+
+基线 `e6d717c` 的 [完整 CI](https://github.com/umuo/sandbox-demo/actions/runs/40084560419) 已确认 15/15 成功。本轮增加固定分类的不可变 `hostDetails()`，保持旧构造器兼容；native close/free、路径 lease、desktop、文件与 window-station ACL、worker session 分别保留真实状态。活动检查继续持有准入名额，FAILED 不会被后续成功覆盖，未观察的分类没有成功默认值。
+
+修复 protected 路径快照可能捕获继承的临时 capability ACE 的时序问题：持久专用账户授权之后、临时授权之前捕获快照；撤销所有临时授权与恢复快照后，再读回检查 SID 已消失。原始 DACL 的有效 ACE 字节及继承保护位均需匹配，不比较未使用的 ACL padding。session 创建授权失败也执行目录清理；关闭失败记录 FAILED 并继续其他回收，避免原有静默吞掉异常。
+
+新增四项跨平台回归及六项双后端原生验收。故障范围涵盖 ACL 准备、desktop 创建、Job 创建/挂入/恢复、各类关闭/撤销 acknowledgement；覆盖 protected 子路径不带回 capability ACE、重复 close、失败粘滞与恢复后再次执行。原生必测清单更新为默认 24、production 17，分类状态 XML 随 CI artifact 上传。原生用例只操作合成目录与随机 capability；清理故障先真实回收再模拟失败结果，不污染 CI 宿主。
+
+JDK 8 与 JDK 17 完整 verify 的本地结果各 167 项、0 失败、0 错误、46 跳过。Windows 原生用例在 macOS 上跳过，真实验收以本轮提交对应 CI 为准。总体 Windows `hostResources=UNKNOWN` 继续保留：JNA 托管分配等尚无完整独立证明，production 协议 v7 仍不报告 worker 内部清理，并显式记录 `REMOTE_WORKER=UNKNOWN`。分类 CONFIRMED 仅确认已登记检查，不扩大隔离或全面回收保证。

@@ -91,15 +91,17 @@ final class WindowsAclManager {
         // restore stale snapshots over one another. Windows mutexes are recursive, so the
         // read/merge/write helpers below can continue taking the same lock defensively.
         WindowsAclUpdateLock leaseLock = WindowsAclUpdateLock.acquire();
+        WindowsCleanup.Check cleanup =
+                WindowsCleanup.begin(io.github.sandboxdemo.api.SandboxHostResource.FILESYSTEM_ACL);
         boolean lockTransferred = false;
         List<AclMutation> applied = new ArrayList<>();
         Map<Path, DaclSnapshot> snapshots = new LinkedHashMap<>();
         List<String> capabilitySids = new ArrayList<>();
-        List<String> executionSids =
-                sandboxUserSids.isEmpty()
-                        ? io.github.sandboxdemo.core.Java8.listOf(currentUserSid())
-                        : io.github.sandboxdemo.core.Java8.copyList(sandboxUserSids);
         try {
+            List<String> executionSids =
+                    sandboxUserSids.isEmpty()
+                            ? io.github.sandboxdemo.core.Java8.listOf(currentUserSid())
+                            : io.github.sandboxdemo.core.Java8.copyList(sandboxUserSids);
             // Dedicated-user read/write grants are persistent installation state. Apply them before
             // taking temporary DACL snapshots so restoring a request lease retains those grants.
             for (Path readableRoot : policy.readableRoots()) {
@@ -121,6 +123,13 @@ final class WindowsAclManager {
             }
 
             List<Path> readOnlyRoots = readOnlyRoots(policy);
+            // Capture before capability grants can propagate into protected descendants.
+            for (Path root : readOnlyRoots) {
+                snapshot(snapshots, root);
+            }
+            for (Path root : policy.protectedPaths()) {
+                snapshot(snapshots, root);
+            }
             if (policy.deletionPolicy() == DeletionPolicy.ALLOW) {
                 // A deny inherited from a read-only parent must not disable deletion inside an
                 // explicitly writable child. Protect the child DACL before the parent deny is
@@ -182,15 +191,25 @@ final class WindowsAclManager {
                     deny(protectedPath, executionSid, DENY_DELETE);
                 }
             }
+            if (!WindowsCleanup.allowed("acl-applied")) {
+                throw win32("temporary ACL preparation");
+            }
             WindowsAclLease lease =
-                    new WindowsAclLease(this, capabilitySids, applied, snapshots, leaseLock);
+                    new WindowsAclLease(
+                            this, capabilitySids, applied, snapshots, leaseLock, cleanup);
             lockTransferred = true;
             return lease;
         } catch (SandboxException e) {
-            rollback(applied, snapshots);
+            cleanup.complete(
+                    rollback(applied, snapshots)
+                            ? io.github.sandboxdemo.api.SandboxCleanupState.CONFIRMED
+                            : io.github.sandboxdemo.api.SandboxCleanupState.FAILED);
             throw e;
         } catch (RuntimeException | Error e) {
-            rollback(applied, snapshots);
+            cleanup.complete(
+                    rollback(applied, snapshots)
+                            ? io.github.sandboxdemo.api.SandboxCleanupState.CONFIRMED
+                            : io.github.sandboxdemo.api.SandboxCleanupState.FAILED);
             throw e;
         } finally {
             if (!lockTransferred) {
@@ -249,7 +268,7 @@ final class WindowsAclManager {
             return com.sun.jna.platform.win32.Advapi32Util.getTokenAccount(token.getValue())
                     .sidString;
         } finally {
-            com.sun.jna.platform.win32.Kernel32.INSTANCE.CloseHandle(token.getValue());
+            WindowsCleanup.closeHandle(token.getValue().getPointer());
         }
     }
 
@@ -291,15 +310,16 @@ final class WindowsAclManager {
         return DENY_DELETE;
     }
 
-    private void rollback(List<AclMutation> mutations, Map<Path, DaclSnapshot> snapshots) {
+    private boolean rollback(List<AclMutation> mutations, Map<Path, DaclSnapshot> snapshots) {
+        boolean success = true;
         List<AclMutation> reverse = new ArrayList<>(mutations);
         Collections.reverse(reverse);
         for (AclMutation mutation : reverse) {
             try {
                 remove(mutation);
-            } catch (Exception ignored) {
-                // A random capability SID left after a crash/rollback is inert because
-                // no subsequent restricted token reuses it.
+            } catch (Exception | LinkageError ignored) {
+                success = false; // Keep removing unrelated entries; never report this failure as
+                // success.
             }
         }
 
@@ -310,12 +330,24 @@ final class WindowsAclManager {
         for (DaclSnapshot snapshot : ordered) {
             try {
                 snapshot.restore();
-            } catch (Exception ignored) {
-                // The deny never removes WRITE_DAC, so a later host recovery can restore the DACL.
+            } catch (Exception | LinkageError ignored) {
+                success = false;
             } finally {
                 snapshot.close();
             }
         }
+        // An inherited capability ACE can remain until its ancestor grant is revoked. Verify
+        // absence only after all revocations and snapshot restoration have completed.
+        for (AclMutation mutation : mutations) {
+            try {
+                success &= WindowsAclEvidence.named(mutation.path(), null, null, mutation.sid());
+            } catch (Exception | LinkageError ignored) {
+                success = false;
+            }
+        }
+        return success
+                && WindowsCleanup.allowed(
+                        io.github.sandboxdemo.api.SandboxHostResource.FILESYSTEM_ACL.name());
     }
 
     private void remove(AclMutation mutation) throws SandboxException {
@@ -404,13 +436,13 @@ final class WindowsAclManager {
             }
         } finally {
             if (newAcl != null) {
-                Kernel32.INSTANCE.LocalFree(newAcl);
+                WindowsCleanup.localFree(newAcl);
             }
             if (securityDescriptor != null) {
-                Kernel32.INSTANCE.LocalFree(securityDescriptor);
+                WindowsCleanup.localFree(securityDescriptor);
             }
             if (convertedSid != null) {
-                Kernel32.INSTANCE.LocalFree(convertedSid);
+                WindowsCleanup.localFree(convertedSid);
             }
         }
     }
@@ -446,7 +478,7 @@ final class WindowsAclManager {
             }
             int wait = Kernel32.INSTANCE.WaitForSingleObject(mutex, INFINITE);
             if (wait != WAIT_OBJECT_0 && wait != WAIT_ABANDONED) {
-                Kernel32.INSTANCE.CloseHandle(mutex);
+                WindowsCleanup.closeHandle(mutex);
                 throw win32("WaitForSingleObject(ACL mutex)");
             }
             return new WindowsAclUpdateLock(mutex);
@@ -454,8 +486,13 @@ final class WindowsAclManager {
 
         @Override
         public void close() {
-            Kernel32.INSTANCE.ReleaseMutex(mutex);
-            Kernel32.INSTANCE.CloseHandle(mutex);
+            WindowsCleanup.run(
+                    io.github.sandboxdemo.api.SandboxHostResource.NATIVE_HANDLES,
+                    () -> {
+                        boolean released = Kernel32.INSTANCE.ReleaseMutex(mutex);
+                        boolean closed = WindowsCleanup.closeHandle(mutex);
+                        return released & closed;
+                    });
         }
     }
 
@@ -466,6 +503,7 @@ final class WindowsAclManager {
         private final List<AclMutation> mutations;
         private final Map<Path, DaclSnapshot> snapshots;
         private final WindowsAclUpdateLock leaseLock;
+        private final WindowsCleanup.Check cleanup;
         private boolean closed;
 
         private WindowsAclLease(
@@ -473,12 +511,14 @@ final class WindowsAclManager {
                 List<String> capabilitySids,
                 List<AclMutation> mutations,
                 Map<Path, DaclSnapshot> snapshots,
-                WindowsAclUpdateLock leaseLock) {
+                WindowsAclUpdateLock leaseLock,
+                WindowsCleanup.Check cleanup) {
             this.manager = manager;
             this.capabilitySids = io.github.sandboxdemo.core.Java8.copyList(capabilitySids);
             this.mutations = io.github.sandboxdemo.core.Java8.copyList(mutations);
             this.snapshots = new LinkedHashMap<>(snapshots);
             this.leaseLock = leaseLock;
+            this.cleanup = cleanup;
         }
 
         List<String> capabilitySids() {
@@ -490,7 +530,11 @@ final class WindowsAclManager {
             if (!closed) {
                 closed = true;
                 try {
-                    manager.rollback(mutations, snapshots);
+                    boolean success = manager.rollback(mutations, snapshots);
+                    cleanup.complete(
+                            success
+                                    ? io.github.sandboxdemo.api.SandboxCleanupState.CONFIRMED
+                                    : io.github.sandboxdemo.api.SandboxCleanupState.FAILED);
                 } finally {
                     leaseLock.close();
                 }
@@ -505,6 +549,7 @@ final class WindowsAclManager {
         private final Pointer securityDescriptor;
         private final Pointer dacl;
         private final boolean protectedDacl;
+        private final byte[] originalAcl;
         private boolean closed;
 
         private DaclSnapshot(
@@ -513,6 +558,7 @@ final class WindowsAclManager {
             this.securityDescriptor = securityDescriptor;
             this.dacl = dacl;
             this.protectedDacl = protectedDacl;
+            this.originalAcl = WindowsAclEvidence.bytes(dacl);
         }
 
         static DaclSnapshot capture(Path path) throws SandboxException {
@@ -532,7 +578,7 @@ final class WindowsAclManager {
                 throw windowsError("GetNamedSecurityInfoW(snapshot, " + path + ")", getError);
             }
             if (dacl.getValue() == null) {
-                Kernel32.INSTANCE.LocalFree(descriptor.getValue());
+                WindowsCleanup.localFree(descriptor.getValue());
                 throw new SandboxException(
                         io.github.sandboxdemo.api.SandboxErrorCode.POLICY_INVALID,
                         io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
@@ -544,7 +590,7 @@ final class WindowsAclManager {
             if (!Advapi32.INSTANCE.GetSecurityDescriptorControl(
                     descriptor.getValue(), control, revision)) {
                 int error = com.sun.jna.Native.getLastError();
-                Kernel32.INSTANCE.LocalFree(descriptor.getValue());
+                WindowsCleanup.localFree(descriptor.getValue());
                 throw new SandboxException(
                         io.github.sandboxdemo.api.SandboxErrorCode.POLICY_INVALID,
                         io.github.sandboxdemo.api.SandboxPhase.PREPARATION,
@@ -572,6 +618,12 @@ final class WindowsAclManager {
                     protectedDacl
                             ? PROTECTED_DACL_SECURITY_INFORMATION
                             : UNPROTECTED_DACL_SECURITY_INFORMATION);
+            if (!WindowsAclEvidence.named(path, originalAcl, protectedDacl, null)) {
+                throw new SandboxException(
+                        io.github.sandboxdemo.api.SandboxErrorCode.CLEANUP_FAILED,
+                        io.github.sandboxdemo.api.SandboxPhase.CLEANUP,
+                        "original DACL or inheritance was not restored");
+            }
         }
 
         private void set(int protectionFlag) throws SandboxException {
@@ -593,7 +645,7 @@ final class WindowsAclManager {
         public void close() {
             if (!closed) {
                 closed = true;
-                Kernel32.INSTANCE.LocalFree(securityDescriptor);
+                WindowsCleanup.localFree(securityDescriptor);
             }
         }
     }

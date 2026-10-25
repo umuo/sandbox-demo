@@ -31,6 +31,10 @@ public final class ExecutionContext implements SandboxExecutionControl {
     private final Runnable whenSettled;
     private boolean capacityReleased;
     private final java.util.Map<java.nio.file.Path, Lease> temporaries = new java.util.HashMap<>();
+    private final java.util.Map<SandboxHostResource, SandboxCleanupState> hostDetails =
+            new java.util.EnumMap<>(SandboxHostResource.class);
+    private final java.util.Map<SandboxHostResource, Integer> hostPending =
+            new java.util.EnumMap<>(SandboxHostResource.class);
 
     public ExecutionContext(Duration timeout, Duration grace) {
         this(timeout, grace, () -> {});
@@ -169,12 +173,69 @@ public final class ExecutionContext implements SandboxExecutionControl {
     }
 
     public synchronized SandboxCleanupResult cleanup() {
+        java.util.Map<SandboxHostResource, SandboxCleanupState> details =
+                new java.util.EnumMap<>(hostDetails);
+        for (java.util.Map.Entry<SandboxHostResource, Integer> entry : hostPending.entrySet()) {
+            if (entry.getValue() > 0) {
+                details.put(
+                        entry.getKey(),
+                        combine(
+                                details.getOrDefault(
+                                        entry.getKey(), SandboxCleanupState.NOT_REQUIRED),
+                                SandboxCleanupState.UNKNOWN));
+            }
+        }
+        if (reportedCleanup != null) {
+            reportedCleanup
+                    .hostDetails()
+                    .forEach(
+                            (resource, state) ->
+                                    details.merge(resource, state, ExecutionContext::combine));
+        }
         return new SandboxCleanupResult(
                 state(Resource.PROCESS),
                 state(Resource.STREAM),
                 state(Resource.TEMP),
                 state(Resource.HOST),
-                workerFinished);
+                workerFinished,
+                details);
+    }
+
+    /** Named SDK-owned cleanup action; active checks retain host capacity until they finish. */
+    public synchronized HostLease trackHost(SandboxHostResource resource) {
+        java.util.Objects.requireNonNull(resource, "resource");
+        Lease lease = track(Resource.HOST);
+        hostPending.put(resource, hostPending.getOrDefault(resource, 0) + 1);
+        return new HostLease(resource, lease);
+    }
+
+    public final class HostLease {
+        private final SandboxHostResource resource;
+        private final Lease lease;
+        private boolean finished;
+
+        private HostLease(SandboxHostResource resource, Lease lease) {
+            this.resource = resource;
+            this.lease = lease;
+        }
+
+        public void complete(SandboxCleanupState state) {
+            java.util.Objects.requireNonNull(state, "state");
+            synchronized (ExecutionContext.this) {
+                if (finished) {
+                    return;
+                }
+                finished = true;
+                hostPending.put(resource, hostPending.get(resource) - 1);
+                hostDetails.put(
+                        resource,
+                        combine(
+                                hostDetails.getOrDefault(
+                                        resource, SandboxCleanupState.NOT_REQUIRED),
+                                state));
+                lease.complete(state);
+            }
+        }
     }
 
     public synchronized void reportCleanup(SandboxCleanupResult cleanup) {

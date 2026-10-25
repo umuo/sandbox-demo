@@ -50,7 +50,7 @@ try {
     & icacls.exe $root /grant "*${sid}:(OI)(CI)F" /T /Q | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Could not grant access to isolated CI files' }
 
-    $tests = 'WindowsRestrictedTokenSandboxRunnerTest,WindowsDefaultAcceptanceTest,WindowsLifecycleIntegrationTest,WindowsOutputLimitIntegrationTest,WindowsReadinessIntegrationTest,WindowsResourceLimitsIntegrationTest,SandboxStrictEnvironmentIntegrationTest'
+    $tests = 'WindowsRestrictedTokenSandboxRunnerTest,WindowsDefaultAcceptanceTest,WindowsLifecycleIntegrationTest,WindowsHostCleanupIntegrationTest,WindowsOutputLimitIntegrationTest,WindowsReadinessIntegrationTest,WindowsResourceLimitsIntegrationTest,SandboxStrictEnvironmentIntegrationTest'
     $entry = Join-Path $root 'run.cmd'
     # Deliberately do not inherit the runner's Maven settings or production backend selector.
     $emptySettings = Join-Path $root 'settings.xml'
@@ -95,7 +95,7 @@ exit /b %ERRORLEVEL%
         & taskkill.exe /PID $process.Id /T /F | Out-Null
     }
     # Copy reports even on failure; no account name/password is included in the identity evidence.
-    foreach ($name in @('surefire-reports', 'backend-evidence', 'admission-evidence')) {
+    foreach ($name in @('surefire-reports', 'backend-evidence', 'admission-evidence', 'cleanup-evidence')) {
         $path = Join-Path $root "source/target/$name"
         if (Test-Path $path) { Copy-Item $path $evidence -Recurse -Force }
     }

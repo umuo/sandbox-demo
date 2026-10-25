@@ -30,9 +30,12 @@ final class WindowsPathLease implements AutoCloseable {
     private static final int FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000;
 
     private final List<Pointer> handles;
+    private final WindowsCleanup.Check cleanup;
+    private boolean closed;
 
-    private WindowsPathLease(List<Pointer> handles) {
+    private WindowsPathLease(List<Pointer> handles, WindowsCleanup.Check cleanup) {
         this.handles = handles;
+        this.cleanup = cleanup;
     }
 
     static WindowsPathLease acquire(ValidatedPolicy policy, Path executable)
@@ -50,6 +53,8 @@ final class WindowsPathLease implements AutoCloseable {
         protectedObjects.add(policy.privateTempDirectory());
 
         List<Pointer> handles = new ArrayList<>();
+        WindowsCleanup.Check cleanup =
+                WindowsCleanup.begin(io.github.sandboxdemo.api.SandboxHostResource.PATH_HANDLES);
         try {
             for (Path path :
                     protectedObjects.stream()
@@ -65,9 +70,13 @@ final class WindowsPathLease implements AutoCloseable {
                 rejectReparseComponents(executable);
                 handles.add(openWithoutWriteOrDeleteSharing(executable));
             }
-            return new WindowsPathLease(handles);
-        } catch (SandboxException e) {
-            closeAll(handles);
+            return new WindowsPathLease(handles, cleanup);
+        } catch (SandboxException | RuntimeException | Error e) {
+            boolean success = closeAll(handles);
+            cleanup.complete(
+                    success
+                            ? io.github.sandboxdemo.api.SandboxCleanupState.CONFIRMED
+                            : io.github.sandboxdemo.api.SandboxCleanupState.FAILED);
             throw e;
         }
     }
@@ -151,15 +160,29 @@ final class WindowsPathLease implements AutoCloseable {
                 operation + " failed, Win32=" + Native.getLastError());
     }
 
-    private static void closeAll(List<Pointer> handles) {
+    private static boolean closeAll(List<Pointer> handles) {
         List<Pointer> reverse = new ArrayList<>(handles);
         Collections.reverse(reverse);
-        reverse.forEach(Kernel32.INSTANCE::CloseHandle);
+        boolean success = true;
+        for (Pointer handle : reverse) {
+            success &= WindowsCleanup.closeHandle(handle);
+        }
+        return success;
     }
 
     @Override
-    public void close() {
-        closeAll(handles);
-        handles.clear();
+    public synchronized void close() {
+        if (!closed) {
+            closed = true;
+            boolean success =
+                    WindowsCleanup.run(
+                            io.github.sandboxdemo.api.SandboxHostResource.PATH_HANDLES,
+                            () -> closeAll(handles));
+            cleanup.complete(
+                    success
+                            ? io.github.sandboxdemo.api.SandboxCleanupState.CONFIRMED
+                            : io.github.sandboxdemo.api.SandboxCleanupState.FAILED);
+            handles.clear();
+        }
     }
 }

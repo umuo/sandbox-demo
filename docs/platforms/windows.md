@@ -309,6 +309,12 @@ ALLOW 的含义是“SDK 不阻断”，不是绕过宿主 Firewall、代理、�
 
 升级、安装和卸载详见 [SDK 集成](../SDK.md)。
 
+## 回收证据
+
+默认与 production 宿主侧分别记录 native handle、路径 lease、文件 ACL、私有 desktop、window-station ACL 和 worker session 的实际检查。文件 ACL 快照在临时 capability 授权前捕获，恢复时保留原始 ACE 与继承保护状态，避免恢复受保护子路径时带回临时授权。借用的 process window-station handle 不按拥有句柄关闭。
+
+`SandboxCleanupResult.hostDetails()` 的语义、未观察分类和 production `REMOTE_WORKER=UNKNOWN` 边界见 [SDK 清理快照](../SDK.md)。总体宿主回收仍不能保证完整确认。两个 Windows CI 后端都必须执行故障分支测试，状态证据在 `cleanup-evidence/` artifact 中，仅含固定分类与状态。
+
 ## 一手资料
 
 - [CreateRestrictedToken](https://learn.microsoft.com/windows/win32/api/securitybaseapi/nf-securitybaseapi-createrestrictedtoken)
