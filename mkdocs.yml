@@ -52,6 +52,7 @@ nav:
       - AGT 维护需求: agt-integration-requirements.md
       - AGT 维护进度: agt-maintenance-progress.md
       - JDK 8 优化路线: optimization-roadmap-jdk8.md
+      - 输出分配基准: output-allocation-benchmark.md
       - 制品发布: PUBLISHING.md
       - 文档站点开发: site-development.md
 

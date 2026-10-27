@@ -83,7 +83,7 @@ mvn -o -B -ntp -Dmaven.repo.local=/Volumes/Nas/envs/maven/repository verify
 
 **验收：** 成功和各失败分支都不遗留临时授权；关闭失败产生 FAILED/UNKNOWN；原始 DACL 保持完整；并发执行之间无相互撤销授权。测试只操作合成目录与专用测试账户。不能通过删除 UNKNOWN 分支来“提高成功率”。
 
-### O-05 · P2：减少输出路径分配与复制（开销已确认，收益待量化）
+### O-05 · P2：减少输出路径分配与复制（已实施首轮优化并量化）
 
 **依据：** `LimitedOutput.accept()` 在没有消费者时仍调用 `Arrays.copyOf(buffer, observed)`；`OutputCallbacks` 给 byte consumer 又复制一次。最终 `bytes.toByteArray()` 与 `SandboxResult` 构造器继续复制结果。文本解码每块分配输入及 CharBuffer。已有每流/聚合上限，并非无界保留输出，但分配率及峰值内存仍可能明显高于配置额度。
 
@@ -234,3 +234,13 @@ mvn verify
 JDK 8 与 JDK 17 完整 verify 的本地结果各 167 项、0 失败、0 错误、46 跳过。Windows 原生用例在 macOS 上跳过，真实验收以本轮提交对应 CI 为准。总体 Windows `hostResources=UNKNOWN` 继续保留：JNA 托管分配等尚无完整独立证明，production 协议 v7 仍不报告 worker 内部清理，并显式记录 `REMOTE_WORKER=UNKNOWN`。分类 CONFIRMED 仅确认已登记检查，不扩大隔离或全面回收保证。
 
 分类检查与故障验收提交 `c1fafa2` 的 [完整 CI](https://github.com/umuo/sandbox-demo/actions/runs/40178465491) 已确认 15/15 成功，包含两条 Windows 后端的 JDK 8/17/21。最终复查补齐用户环境块释放返回值，并把 NATIVE_ALLOCATIONS 的失败 acknowledgement 加入相同原生验收；该补充仍需以其对应提交的 CI 为准。
+
+## 11. O-05 实施与验收（2026-10-27）
+
+基线 `eedbf5c` 的 [完整 CI](https://github.com/umuo/sandbox-demo/actions/runs/40178781832) 已确认 15/15 成功。本轮把 LimitedOutput 到内部 OutputCallbacks 的交接改为同步消费借用数组的有效前缀：无回调时不再创建观察数组，字节回调仅保留一次用户所有权复制；文本完整块直接交给现有同步解码器，部分块仍复制有效前缀。公共结果和回调的防御性复制、输出额度、RAW/RETAINED 与终止原因均不变，没有修改 worker 协议。
+
+先在未改主代码时记录基线，再用固定 128 MiB heap 的三个独立 fork 对比。32 MiB 合成输入、8 MiB 保留上限时，无回调每次累计分配约 56.06 → 24.00 MiB，字节回调约 88.13 → 56.06 MiB；文本解码仍是剩余分配热点，暂不重写内部缓冲。并非所有场景峰值 heap 代理下降，吞吐微基准也不等于完整沙箱执行提速。完整参数、八种场景、GC/heap 指标局限、原始样本和复现命令见 [输出分配基准](output-allocation-benchmark.md)。基准脚本不下载依赖，所有生成内容位于外置盘项目 target 下，不纳入常规 CI 的耗时阈值。
+
+新增四项语义用例，内部遍历回调、额度模式和编码组合；针对性 20 项测试、实际 JDK 8/17 完整 verify（各 171 项，0 失败、0 错误、46 跳过）已通过。原有 Windows 双后端、Linux/macOS 原生输出与生命周期门禁继续执行；最终跨平台通过状态以对应新提交的完整 CI 为准。文档与独立 Java 8 consumer 同时验收。后续可以独立评估文本 decoder 缓冲复用，不因本轮性能收益扩大清理或隔离保证。
+
+补充本机验收：两项 macOS 原生输出超限测试无跳过通过；JDK 8 的 11 个外部消费示例与 27 段正文片段编译通过；严格 MkDocs 构建通过。

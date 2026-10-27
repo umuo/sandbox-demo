@@ -34,14 +34,23 @@ public final class OutputCallbacks {
     }
 
     public void accept(byte[] chunk) {
-        if (chunk.length == 0) {
+        accept(chunk, chunk.length);
+    }
+
+    /** Consumes a borrowed prefix synchronously; only the user byte callback owns a copy. */
+    void accept(byte[] chunk, int count) {
+        if (count < 0 || count > chunk.length) {
+            throw new IllegalArgumentException("invalid output chunk length");
+        }
+        if (count == 0) {
             return;
         }
         if (byteConsumer != null) {
-            acceptIgnoringFailure(byteConsumer, Arrays.copyOf(chunk, chunk.length));
+            acceptIgnoringFailure(byteConsumer, Arrays.copyOf(chunk, count));
         }
         if (textDecoder != null) {
-            textDecoder.accept(chunk);
+            // Both decoders consume/copy input before returning, never retain the borrowed array.
+            textDecoder.accept(count == chunk.length ? chunk : Arrays.copyOf(chunk, count));
         }
     }
 

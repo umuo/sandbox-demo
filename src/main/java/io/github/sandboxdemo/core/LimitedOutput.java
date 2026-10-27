@@ -5,7 +5,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
-import java.util.Arrays;
 import java.util.function.Consumer;
 
 public final class LimitedOutput {
@@ -93,7 +92,7 @@ public final class LimitedOutput {
         }
         int observed = mode == io.github.sandboxdemo.api.OutputCallbackMode.RAW ? count : allowed;
         if (observed > 0) {
-            callbacks.accept(Arrays.copyOf(buffer, observed));
+            callbacks.accept(buffer, observed);
         }
     }
 
