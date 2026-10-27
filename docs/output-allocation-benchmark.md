@@ -4,7 +4,7 @@
 
 ## 方法与范围
 
-基线源码为 `eedbf5cc610bde41010c68a305cf1e17593e007a`。macOS 15.1 arm64、Zulu JDK 8u462，固定 `-Xms128m -Xmx128m -XX:+UseSerialGC`。每个独立 JVM 先预热三次，再测五次；每种场景分别运行三个基线和三个优化 JVM，按 fork 交替先后顺序。最终采样不与本轮 Maven 构建并行。表格各指标取三个 fork 的中位数，吞吐由输入总量/耗时换算。原始样本附有 Java/OS、基线 SHA 和主代码 diff，见 [JSON 证据](evidence/output-allocation-jdk8-2026-10-27.json)。
+基线源码为 `eedbf5cc610bde41010c68a305cf1e17593e007a`。macOS 15.1 arm64、Zulu JDK 8u462，固定 `-Xms128m -Xmx128m -XX:+UseSerialGC`。每个独立 JVM 先预热三次，再测五次；每种场景分别运行三个基线和三个优化 JVM，按 fork 交替先后顺序。最终采样不与本轮 Maven 构建并行。表格各指标取三个 fork 的中位数，吞吐由输入总量/耗时换算。原始样本附有 Java/OS、基线 SHA 和捕获层两个类的 diff，见 [JSON 证据](evidence/output-allocation-jdk8-2026-10-27.json)。
 
 输入是固定 ASCII 合成数据，复用 8 KiB 缓冲；单流保留上限为 8 MiB，分别输入 8 MiB（恰好上限）和 32 MiB（超限继续排空）。使用 RAW/TRUNCATE，测 none、byte、text、both 四种回调组合。包含保留缓冲增长、完成时 `bytes()` 复制及回调/解码分配，不含实际进程、管道、OS 隔离、`SandboxResult` 构造或用户业务处理。callback 的合成消费者把数据存入 volatile sink，防止副本被 JIT 完全消除。单线程分配由 ThreadMXBean 累计计数取得，不把它当作所有后台线程的分配量。
 
@@ -43,8 +43,14 @@ JDK 路径为本机示例，其他环境应设置自己的 JAVA_HOME。脚本只
 
 ## 语义与平台验收
 
-新增四项语义测试，在测试内部遍历无回调/byte/text/both、RAW/RETAINED、TRUNCATE/TERMINATE，检查共享额度、精确上限、多余字节、继续排空、有效前缀、UTF-8/UTF-16LE/BE 的跨块及 BOM/无 BOM、重复完成，以及回调篡改数组与输入缓冲复用。保留结果及 SandboxResult 的防御性复制另有断言。与原输出测试一起的 20 项针对性测试已通过。
+新增五项语义测试，在测试内部遍历无回调/byte/text/both、RAW/RETAINED、TRUNCATE/TERMINATE，检查共享额度、精确上限、多余字节、继续排空、有效前缀、UTF-8/UTF-16LE/BE 的跨块及 BOM/无 BOM、重复完成，以及回调篡改数组与输入缓冲复用。保留结果及 SandboxResult 的防御性复制另有断言。原有输出测试与新增语义测试共 21 项通过。多字节观察者回归在修复前复现共享数组污染，修复后通过。
 
-JDK 8/17 完整 verify 各 171 项，0 失败、0 错误、46 跳过；本机平台跳过不计作 Windows/Linux 原生成功。完整远端 CI 的 Windows 默认与 production、Linux、macOS 输出/生命周期场景仍是平台验收依据。无回调优化不更改现有清理 UNKNOWN、准入容量或输出超限原因。
+JDK 8/17 完整 verify 各 172 项，0 失败、0 错误、46 跳过；本机平台跳过不计作 Windows/Linux 原生成功。完整远端 CI 的 Windows 默认与 production、Linux、macOS 输出/生命周期场景仍是平台验收依据。无回调优化不更改现有清理 UNKNOWN、准入容量或输出超限原因。
 
 本机额外启用 `SANDBOX_RUN_OUTPUT_INTEGRATION=1`，两项 macOS 原生输出超限用例均通过、无跳过；实际 JDK 8 的 11 个外部消费示例、27 段正文片段编译及严格 MkDocs 构建均通过。原生测试只运行合成命令，不操作宿主业务服务。
+
+### 多个字节观察者的所有权修复
+
+补充回归发现原来的 builder 回调组合会把同一可变数组依次交给多个字节观察者，后一个可能看到前一个的修改。本轮改为扁平、不可变的注册快照，每个字节观察者各取得独立副本；单观察者继续沿用原有调用方式。新增测试同时覆盖 stdout/stderr、RAW/RETAINED、修改后抛异常、继续通知后续观察者，以及 builder 后续注册不改变已构建请求。
+
+该隔离在多观察者场景需要按观察者数量复制；扁平调度避免嵌套复制链。本页分配基准是单个 byte/text 消费者的捕获层对比，不包含 SandboxRequest 的多观察者组合，不将表中收益推广到多字节观察者场景。原始样本的两个捕获类未因该修复变化，因此基准仍适用其明确范围。

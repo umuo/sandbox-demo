@@ -115,6 +115,54 @@ class LimitedOutputSemanticsTest {
     }
 
     @Test
+    void multipleByteObserversCannotMutateEachOtherOrEarlierBuiltRequests() {
+        for (boolean stderr : new boolean[] {false, true}) {
+            for (OutputCallbackMode mode : OutputCallbackMode.values()) {
+                StringBuilder second = new StringBuilder(),
+                        third = new StringBuilder(),
+                        text = new StringBuilder();
+                SandboxRequest.Builder builder =
+                        SandboxRequest.builder(java.nio.file.Paths.get("target"), "unused");
+                Consumer<byte[]> mutator =
+                        chunk -> {
+                            Arrays.fill(chunk, (byte) 'x');
+                            throw new IllegalStateException("synthetic");
+                        };
+                Consumer<byte[]> observer =
+                        chunk -> second.append(new String(chunk, StandardCharsets.UTF_8));
+                if (stderr) builder.stderrConsumer(mutator).stderrConsumer(observer);
+                else builder.stdoutConsumer(mutator).stdoutConsumer(observer);
+                SandboxRequest built = builder.build();
+                Consumer<byte[]> later =
+                        chunk -> third.append(new String(chunk, StandardCharsets.UTF_8));
+                if (stderr) builder.stderrConsumer(later);
+                else builder.stdoutConsumer(later);
+                LimitedOutput capture =
+                        new LimitedOutput(
+                                8,
+                                stderr ? built.stderrConsumer() : built.stdoutConsumer(),
+                                text::append,
+                                StandardCharsets.UTF_8,
+                                false,
+                                new OutputBudget(0, OutputLimitAction.TRUNCATE, null),
+                                mode);
+                byte[] input = "original".getBytes(StandardCharsets.UTF_8);
+                capture.accept(input, input.length);
+                capture.complete();
+                assertEquals("original", second.toString());
+                assertEquals("", third.toString());
+                assertEquals("original", text.toString());
+                assertArrayEquals(input, capture.bytes());
+                SandboxRequest extended = builder.build();
+                (stderr ? extended.stderrConsumer() : extended.stdoutConsumer()).accept(input);
+                assertEquals("original", third.toString());
+                assertEquals("originaloriginal", second.toString());
+                assertEquals("original", new String(input, StandardCharsets.UTF_8));
+            }
+        }
+    }
+
+    @Test
     void streamingDecoderPreservesSplitUtf8AndUtf16WithAndWithoutBom() {
         String expected = "hello 中文 € end";
         for (Charset charset :

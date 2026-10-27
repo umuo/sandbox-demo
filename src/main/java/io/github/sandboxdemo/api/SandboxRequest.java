@@ -348,7 +348,7 @@ public final class SandboxRequest {
             if (stdoutConsumer == null) {
                 return this;
             }
-            this.stdoutConsumer = combineConsumers(this.stdoutConsumer, stdoutConsumer);
+            this.stdoutConsumer = combineByteConsumers(this.stdoutConsumer, stdoutConsumer);
             return this;
         }
 
@@ -357,7 +357,7 @@ public final class SandboxRequest {
             if (stderrConsumer == null) {
                 return this;
             }
-            this.stderrConsumer = combineConsumers(this.stderrConsumer, stderrConsumer);
+            this.stderrConsumer = combineByteConsumers(this.stderrConsumer, stderrConsumer);
             return this;
         }
 
@@ -435,6 +435,37 @@ public final class SandboxRequest {
             stderrConsumer(listener::onStderr);
             stderrTextConsumer(listener::onStderrText);
             return this;
+        }
+
+        private static Consumer<byte[]> combineByteConsumers(
+                Consumer<byte[]> existing, Consumer<byte[]> additional) {
+            if (existing == null) {
+                return additional;
+            }
+            java.util.List<Consumer<byte[]>> consumers = new java.util.ArrayList<>();
+            if (existing instanceof ByteConsumers) {
+                consumers.addAll(((ByteConsumers) existing).consumers);
+            } else {
+                consumers.add(existing);
+            }
+            consumers.add(additional);
+            return new ByteConsumers(consumers);
+        }
+
+        /** Flat immutable registration snapshot; each byte observer owns an independent copy. */
+        private static final class ByteConsumers implements Consumer<byte[]> {
+            private final java.util.List<Consumer<byte[]>> consumers;
+
+            private ByteConsumers(java.util.List<Consumer<byte[]>> consumers) {
+                this.consumers = java.util.Collections.unmodifiableList(consumers);
+            }
+
+            @Override
+            public void accept(byte[] value) {
+                for (Consumer<byte[]> consumer : consumers) {
+                    acceptIgnoringFailure(consumer, Arrays.copyOf(value, value.length));
+                }
+            }
         }
 
         private static <T> Consumer<T> combineConsumers(
